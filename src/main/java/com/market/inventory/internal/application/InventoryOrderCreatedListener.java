@@ -13,7 +13,7 @@ public class InventoryOrderCreatedListener {
         this.inventoryService = inventoryService;
     }
 
-    @ApplicationModuleListener
+    @ApplicationModuleListener(id = "inventory.reserve-items-on-order-created")
     void on(OrderCreatedEvent event) {
         var items = event.items().stream()
                 .map(item -> new InventoryService.ItemReservation(

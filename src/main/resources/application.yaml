@@ -1,6 +1,9 @@
 spring:
   application:
     name: ordermod
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 0
   modulith:
     events:
       jdbc:
