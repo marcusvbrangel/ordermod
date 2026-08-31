@@ -1,0 +1,4 @@
+/**
+ * Web adapters of the inventory module.
+ */
+package com.market.inventory.internal.web;

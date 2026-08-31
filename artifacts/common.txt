@@ -1,0 +1,137 @@
+
+------------------------------------------------------------
+
+POST http://localhost:8080/api/v1/order
+Content-Type: application/json
+
+{
+  "customerId": "550e8400-e29b-41d4-a716-446655440000",
+  "paymentMethod": "PIX",
+  "items": [
+    {
+      "productId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "quantity": 2
+    },
+    {
+      "productId": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+      "quantity": 1
+    }
+  ]
+}
+
+
+
+------------------------------------------------------------
+
+SpringDoc
+
+http://localhost:8080/v3/api-docs
+
+/v3/api-docs endpoint is enabled by default. To disable it in production, set the property 'springdoc.api-docs.enabled=false'
+
+SpringDoc
+
+http://localhost:8080/swagger-ui/index.html
+
+/swagger-ui.html endpoint is enabled by default. To disable it in production, set the property 'springdoc.swagger-ui.enabled=false'
+
+
+
+
+------------------------------------------------------------
+
+id -> 4dea9dbe-c240-4f20-a1b0-fcc6650ddc7a
+listener_id -> com.market.inventory.internal.application.InventoryOrderCreatedListener.on(com.market.order.OrderCreatedEvent)
+event_type -> com.market.order.OrderCreatedEvent
+serialized_event -> {"orderId":"153bbf3c-212b-4b23-818b-1a3d9a5e811d","createdAt":"2026-08-31T21:51:37.248103538Z","customerId":"550e8400-e29b-41d4-a716-446655440000","paymentMethod":"PIX","items":[{"productId":"6ba7b810-9dad-11d1-80b4-00c04fd430c8","quantity":2},{"productId":"6ba7b811-9dad-11d1-80b4-00c04fd430c8","quantity":1}]}
+publication_date -> 2026-08-31 18:51:37.251 -0300
+completion_date -> 2026-08-31 18:51:37.336 -0300
+status -> COMPLETED
+completion_attempts -> 1
+last_resubmission_date -> 2026-08-31 18:51:37.251 -0300
+
+
+Esse registro confirma que o catálogo JDBC de eventos do Spring Modulith está funcionando.
+Vou conferir apenas a anotação do listener para explicar corretamente se o processamento
+ocorreu de forma transacional/assíncrona e o que exatamente o estado COMPLETED garante.
+
+Perfeito — isso confirma que o registro JDBC de eventos do Spring Modulith está funcionando corretamente.
+O fluxo ocorrido foi:
+
+OrderService.createOrder()
+  → publica OrderCreatedEvent
+  → Spring Modulith grava EVENT_PUBLICATION
+  → InventoryOrderCreatedListener recebe o evento
+  → InventoryService.reserveItems() é executado
+  → publicação é marcada como COMPLETED
+
+Interpretação dos campos:
+•
+id: identificador da publicação, não do pedido.
+•
+listener_id: método que recebeu o evento.
+•
+event_type: classe pública do evento.
+•
+serialized_event: evento completo serializado em JSON.
+•
+publication_date: momento em que a publicação foi registrada.
+•
+completion_date: momento em que o listener terminou.
+•
+status = COMPLETED: o listener terminou sem lançar exceção.
+•
+completion_attempts = 1: foi processado na primeira tentativa.
+O createdAt aparece como 21:51 UTC, enquanto o banco mostra 18:51 -03:00.
+São exatamente o mesmo instante, apenas em fusos horários diferentes.
+Uma observação importante: atualmente, InventoryService.reserveItems()
+somente registra uma mensagem no log:
+
+LOGGER.info(
+        "Reservando {} item(ns) do estoque para o pedido {}",
+        items.size(),
+        orderId
+);
+
+
+------------------------------------------------------------
+
+Quick setup — if you’ve done this kind of thing before
+https://github.com/marcusvbrangel/ordermod.git
+Get started by creating a new file or uploading an existing file. We recommend every repository include a README, LICENSE, and .gitignore.
+
+…or create a new repository on the command line
+echo "# ordermod" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/marcusvbrangel/ordermod.git
+git push -u origin main
+…or push an existing repository from the command line
+git remote add origin https://github.com/marcusvbrangel/ordermod.git
+git branch -M main
+git push -u origin main
+
+------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
