@@ -1,10 +1,13 @@
-package com.market.order.internal.application;
+package com.market.order.internal.application.service;
 
 import com.market.order.OrderCreatedEvent;
-import com.market.order.internal.domain.Order;
-import com.market.order.internal.domain.OrderItem;
-import com.market.order.internal.infrastructure.persistence.OrderRepository;
-import org.springframework.context.ApplicationEventPublisher;
+import com.market.order.internal.application.port.in.CreateOrderCommand;
+import com.market.order.internal.application.port.in.CreateOrderResult;
+import com.market.order.internal.application.port.in.CreateOrderUseCase;
+import com.market.order.internal.application.port.out.OrderEventPublisher;
+import com.market.order.internal.application.port.out.OrderRepository;
+import com.market.order.internal.domain.model.Order;
+import com.market.order.internal.domain.model.OrderItem;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,22 +16,22 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Service
-public class OrderService {
+public class CreateOrderService implements CreateOrderUseCase {
 
     private final OrderRepository orderRepository;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OrderEventPublisher eventPublisher;
 
-    public OrderService(
+    public CreateOrderService(
             OrderRepository orderRepository,
-            ApplicationEventPublisher eventPublisher
+            OrderEventPublisher eventPublisher
     ) {
         this.orderRepository = orderRepository;
         this.eventPublisher = eventPublisher;
     }
 
+    @Override
     @Transactional
-    public void createOrder(CreateOrderCommand command) {
-
+    public CreateOrderResult createOrder(CreateOrderCommand command) {
         Objects.requireNonNull(command, "command é obrigatório");
 
         var order = new Order(
@@ -49,10 +52,11 @@ public class OrderService {
         var savedOrder = orderRepository.save(order);
 
         publishOrderCreatedEvent(savedOrder);
+
+        return new CreateOrderResult(savedOrder.id());
     }
 
     private void publishOrderCreatedEvent(Order order) {
-
         var orderCreatedEvent = new OrderCreatedEvent(
                 order.id(),
                 order.createdAt(),
@@ -66,6 +70,6 @@ public class OrderService {
                         .toList()
         );
 
-        eventPublisher.publishEvent(orderCreatedEvent);
+        eventPublisher.publish(orderCreatedEvent);
     }
 }

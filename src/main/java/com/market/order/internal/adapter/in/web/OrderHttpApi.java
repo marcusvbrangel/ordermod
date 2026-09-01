@@ -1,4 +1,4 @@
-package com.market.order.internal.web;
+package com.market.order.internal.adapter.in.web;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;

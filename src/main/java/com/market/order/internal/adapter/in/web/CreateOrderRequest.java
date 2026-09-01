@@ -1,4 +1,4 @@
-package com.market.order.internal.web;
+package com.market.order.internal.adapter.in.web;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;

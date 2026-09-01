@@ -1,15 +1,18 @@
 # Arquitetura do Ordermod
 
-Este documento descreve a arquitetura atualmente implementada no projeto. O sistema é um monólito modular construído com Spring Boot e Spring Modulith, organizado por capacidades de negócio.
+Este documento descreve a arquitetura atualmente implementada no projeto. O sistema é um monólito modular construído com Spring Boot e Spring Modulith, organizado por capacidades de negócio. Dentro do módulo `order`, a implementação segue uma arquitetura hexagonal com domínio, portas e adaptadores.
 
-O histórico detalhado da evolução mais recente está em [Registro de desenvolvimento — 31/08/2026](development-log-2026-08-31.md).
+Para uma explicação passo a passo, consulte o [tutorial de arquitetura hexagonal](tutorial-arquitetura-hexagonal.md).
+
+O histórico da refatoração está em [Registro de desenvolvimento — 01/09/2026](development-log-2026-09-01.md). O estado anterior está preservado no [registro de 31/08/2026](development-log-2026-08-31.md).
 
 ## Visão geral
 
 O pacote principal da aplicação é `com.market`. Cada subpacote direto representa um módulo lógico detectado pelo Spring Modulith:
 
-- `com.market.order`: recebimento e criação de pedidos.
-- `com.market.inventory`: reserva de itens em estoque.
+- `com.market.order`: recebimento, persistência e publicação da criação de pedidos;
+- `com.market.inventory`: reação à criação do pedido e reserva de itens, ainda sem persistência real;
+- `com.market.notification`: reação à criação do pedido para notificação;
 - `com.market.payment`: processamento de pagamentos, ainda sem implementação.
 
 Os módulos são executados na mesma aplicação e no mesmo processo Java. Eles não são módulos Maven independentes nem microsserviços.
@@ -18,11 +21,13 @@ Os módulos são executados na mesma aplicação e no mesmo processo Java. Eles 
 flowchart LR
     Client[Cliente HTTP] --> Order[order]
     Order -- OrderCreatedEvent --> Inventory[inventory]
-    Order -. evento futuro .-> Payment[payment]
+    Order -- OrderCreatedEvent --> Notification[notification]
+    Order -. integração futura .-> Payment[payment]
 
     subgraph Application[Aplicação Spring Boot]
         Order
         Inventory
+        Notification
         Payment
     end
 ```
@@ -36,56 +41,17 @@ flowchart LR
 | Spring Modulith | 2.0.8 |
 | Spring Web MVC | API HTTP |
 | Jakarta Bean Validation | Validação das requisições |
-| Spring Data JDBC | Persistência do agregado de pedidos |
+| Spring Data JDBC | Persistência relacional do agregado de pedidos |
 | PostgreSQL | Banco de dados |
 | Flyway | Versionamento e aplicação das migrations |
 | Spring Modulith JDBC | Registro persistente das publicações de eventos |
-| Springdoc OpenAPI | 3.1.0, documentação e Swagger UI |
+| Springdoc OpenAPI | Documentação e Swagger UI |
 | Maven | Build e gerenciamento de dependências |
 | Docker Compose | PostgreSQL para o ambiente local |
 
-## Estrutura de pacotes
+## Módulos e fronteiras
 
-```text
-src/main/java/com/market
-├── OrdermodApplication.java
-├── order
-│   ├── OrderCreatedEvent.java
-│   └── internal
-│       ├── application
-│       │   ├── CreateOrderCommand.java
-│       │   └── OrderService.java
-│       ├── domain
-│       │   ├── Order.java
-│       │   └── OrderItem.java
-│       ├── infrastructure
-│       │   └── persistence
-│       │       └── OrderRepository.java
-│       └── web
-│           ├── CreateOrderRequest.java
-│           ├── OrderController.java
-│           └── OrderHttpApi.java
-├── inventory
-│   └── internal
-│       ├── application
-│       │   ├── InventoryOrderCreatedListener.java
-│       │   └── InventoryService.java
-│       ├── domain
-│       ├── infrastructure
-│       └── web
-└── payment
-    └── internal
-        ├── application
-        ├── domain
-        ├── infrastructure
-        └── web
-```
-
-Os pacotes ainda vazios possuem `package-info.java` para documentar sua finalidade e permitir que a estrutura seja versionada.
-
-## Fronteiras dos módulos
-
-O pacote raiz de cada módulo representa sua API Java pública. Os subpacotes representam detalhes internos.
+O pacote raiz de cada módulo representa sua API Java pública. Os subpacotes `internal` contêm detalhes que não devem ser acessados pelos demais módulos.
 
 | Localização | Finalidade | Pode ser acessado por outro módulo? |
 | --- | --- | --- |
@@ -93,23 +59,93 @@ O pacote raiz de cada módulo representa sua API Java pública. Os subpacotes re
 | `com.market.order.internal.*` | Implementação do módulo `order` | Não |
 | `com.market.inventory` | Contratos públicos do módulo `inventory` | Sim |
 | `com.market.inventory.internal.*` | Implementação do módulo `inventory` | Não |
+| `com.market.notification` | Contratos públicos do módulo `notification` | Sim |
+| `com.market.notification.internal.*` | Implementação do módulo `notification` | Não |
 | `com.market.payment` | Contratos públicos do módulo `payment` | Sim |
 | `com.market.payment.internal.*` | Implementação do módulo `payment` | Não |
 
-Atualmente, `OrderCreatedEvent` é o único contrato público entre módulos. Ele fica em `com.market.order` porque `inventory` precisa importá-lo para registrar seu listener.
+`OrderCreatedEvent` permanece em `com.market.order` porque é o contrato público que os módulos consumidores importam. Os DTOs HTTP, comandos, modelos de domínio, portas e adaptadores permanecem em `com.market.order.internal`.
 
-O nome `internal` expressa uma regra arquitetural do Spring Modulith, mas não é um modificador de acesso do Java. Como vários tipos são `public`, o compilador ainda pode aceitar um import indevido. Para fiscalizar a regra automaticamente, o projeto deverá adicionar um teste com `ApplicationModules.of(OrdermodApplication.class).verify()`.
+O nome `internal` expressa uma fronteira arquitetural do Spring Modulith, não um modificador de acesso do Java. O teste `ModularityTests` usa `ApplicationModules.of(OrdermodApplication.class).verify()` para fiscalizar acessos entre módulos e ciclos de dependência.
 
-## Responsabilidades internas
+## Arquitetura hexagonal do módulo order
 
-Cada módulo está preparado para usar uma separação interna por responsabilidade:
+```text
+src/main/java/com/market/order
+├── OrderCreatedEvent.java                         # API pública entre módulos
+├── package-info.java
+└── internal
+    ├── domain
+    │   ├── model
+    │   │   ├── Order.java
+    │   │   └── OrderItem.java
+    │   ├── exception
+    │   │   └── OrderDomainException.java
+    │   └── package-info.java
+    ├── application
+    │   ├── port
+    │   │   ├── in
+    │   │   │   ├── CreateOrderUseCase.java
+    │   │   │   ├── CreateOrderCommand.java
+    │   │   │   └── CreateOrderResult.java
+    │   │   └── out
+    │   │       ├── OrderRepository.java
+    │   │       └── OrderEventPublisher.java
+    │   ├── service
+    │   │   └── CreateOrderService.java
+    │   └── package-info.java
+    └── adapter
+        ├── in
+        │   └── web
+        │       ├── CreateOrderRequest.java
+        │       ├── OrderController.java
+        │       └── OrderHttpApi.java
+        └── out
+            ├── persistence
+            │   └── jdbc
+            │       ├── OrderPersistenceAdapter.java
+            │       ├── SpringDataOrderRepository.java
+            │       ├── OrderJdbcEntity.java
+            │       ├── OrderItemJdbcEntity.java
+            │       └── OrderPersistenceMapper.java
+            └── event
+                └── SpringOrderEventPublisher.java
+```
 
-- `web`: contrato HTTP, controllers e DTOs de entrada ou saída.
-- `application`: casos de uso, comandos, listeners e coordenação da aplicação.
-- `domain`: agregados, entidades, objetos de valor e regras de negócio.
-- `infrastructure`: persistência e integrações técnicas.
+Os três arquivos `package-info.java` fazem parte do desenho acordado: documentam a API pública do módulo e as camadas `domain` e `application`. Não há arquivos desse tipo adicionais nos subpacotes.
 
-Essa separação é interna ao módulo. Uma classe de `inventory` não deve acessar nenhuma dessas camadas internas de `order`.
+### Responsabilidade de cada área
+
+| Área | Responsabilidade | Dependências permitidas |
+| --- | --- | --- |
+| `domain.model` | Estado, invariantes e comportamento do negócio | Java; não depende de Spring, JDBC ou adaptadores |
+| `domain.exception` | Exceção específica para violações das invariantes de pedido | Java; não depende de Spring, JDBC ou adaptadores |
+| `application.port.in` | Contratos para iniciar casos de uso | Tipos de entrada e resultado da aplicação |
+| `application.service` | Orquestra o caso de uso e delimita a transação | Domínio, portas de entrada/saída e contrato público do evento |
+| `application.port.out` | Necessidades externas declaradas pela aplicação | Domínio e contrato público do evento |
+| `adapter.in.web` | Converte HTTP em chamada de caso de uso | Porta de entrada; não chama persistência diretamente |
+| `adapter.out.persistence.jdbc` | Traduz o domínio e persiste com Spring Data JDBC | Porta de saída, domínio, JDBC e entidades relacionais |
+| `adapter.out.event` | Publica o evento pelo mecanismo do Spring | Porta de saída e `ApplicationEventPublisher` |
+
+### Direção das dependências
+
+As dependências de código apontam dos adaptadores para as portas e para o núcleo da aplicação. O núcleo não conhece controllers, Spring Data repositories nem entidades JDBC.
+
+```mermaid
+flowchart LR
+    HTTP[Adaptador HTTP] --> InPort[CreateOrderUseCase]
+    InPort --> Service[CreateOrderService]
+    Service --> Domain[Order / OrderItem]
+    Service --> RepositoryPort[OrderRepository]
+    Service --> EventPort[OrderEventPublisher]
+    Persistence[Adaptador JDBC] --> RepositoryPort
+    Persistence --> Domain
+    Persistence --> JDBC[(Spring Data JDBC)]
+    EventAdapter[Adaptador de eventos Spring] --> EventPort
+    EventAdapter --> SpringEvents[ApplicationEventPublisher]
+```
+
+No diagrama, as setas representam dependências de código ou chamadas através de contratos. As implementações das portas de saída são injetadas pelo Spring em tempo de execução.
 
 ## Fluxo de criação de pedido
 
@@ -117,50 +153,61 @@ Essa separação é interna ao módulo. Uma classe de `inventory` não deve aces
 sequenceDiagram
     autonumber
     actor Client as Cliente
-    participant API as OrderHttpApi
     participant Controller as OrderController
-    participant Service as OrderService
-    participant Repository as OrderRepository
+    participant InPort as CreateOrderUseCase
+    participant Service as CreateOrderService
+    participant Repository as OrderRepository (porta)
+    participant Jdbc as OrderPersistenceAdapter
     participant Database as PostgreSQL
-    participant Events as ApplicationEventPublisher
-    participant Listener as InventoryOrderCreatedListener
-    participant Inventory as InventoryService
+    participant EventPort as OrderEventPublisher (porta)
+    participant Events as SpringOrderEventPublisher
+    participant Listener as Consumidores Modulith
 
-    Client->>API: POST /api/v1/order
-    API->>Controller: CreateOrderRequest validado
-    Controller->>Controller: converte request em CreateOrderCommand
-    Controller->>Service: createOrder(command)
+    Client->>Controller: POST /api/v1/order + CreateOrderRequest
+    Controller->>Controller: request → CreateOrderCommand
+    Controller->>InPort: createOrder(command)
+    InPort->>Service: executa caso de uso
     Service->>Service: cria Order e OrderItem
     Service->>Repository: save(order)
-    Repository->>Database: INSERT do pedido e dos itens
-    Database-->>Repository: agregado persistido
-    Service->>Events: publica OrderCreatedEvent
-    Service-->>Controller: processamento iniciado
+    Repository->>Jdbc: implementação injetada
+    Jdbc->>Jdbc: domínio → entidades JDBC
+    Jdbc->>Database: INSERT pedido e itens
+    Database-->>Jdbc: agregado persistido
+    Jdbc-->>Service: entidades JDBC → domínio
+    Service->>EventPort: publish(OrderCreatedEvent)
+    EventPort->>Events: implementação injetada
+    Events->>Listener: publicação pelo Spring Modulith
+    Service-->>Controller: CreateOrderResult(orderId)
     Controller-->>Client: 201 Pedido recebido com sucesso
-    Events-->>Listener: evento após o commit
-    Listener->>Listener: converte itens em ItemReservation
-    Listener->>Inventory: reserveItems(orderId, items)
 ```
 
-### Separação dos modelos
+O controller recebe um `CreateOrderResult`, mas o contrato HTTP atual preserva a resposta textual e ainda não expõe o `orderId`.
 
-O fluxo não passa o DTO HTTP diretamente para o serviço:
+### Modelos em cada fronteira
 
 ```text
-CreateOrderRequest
-        ↓ mapeamento no controller
-CreateOrderCommand
-        ↓ processamento no serviço
+CreateOrderRequest                  contrato HTTP
+        ↓ OrderController
+CreateOrderCommand                  entrada do caso de uso
+        ↓ CreateOrderService
+Order + OrderItem                   domínio puro
+        ↓ OrderPersistenceMapper
+OrderJdbcEntity + OrderItemJdbcEntity
+        ↓ Spring Data JDBC
+orders.orders + orders.order_items
+
+Order + OrderItem
+        ↓ CreateOrderService
 OrderCreatedEvent
-        ↓ mapeamento no listener
-InventoryService.ItemReservation
+        ↓ SpringOrderEventPublisher
+InventoryOrderCreatedListener / NotificationOrderCreatedListener
 ```
 
-Essa separação evita que mudanças no JSON ou no evento alterem diretamente os modelos internos das camadas de aplicação.
+Essa separação impede que mudanças no JSON ou no esquema relacional contaminem diretamente o domínio. Também permite testar o caso de uso com implementações simples das portas, sem iniciar HTTP ou PostgreSQL.
 
 ## API HTTP
 
-O contrato HTTP está definido em `OrderHttpApi`. O `OrderController` implementa essa interface e contém apenas a adaptação para o caso de uso.
+O contrato HTTP fica em `adapter.in.web.OrderHttpApi`. O `OrderController` implementa essa interface e contém somente a adaptação para a porta de entrada.
 
 | Método | Caminho | Consome | Produz | Resposta de sucesso |
 | --- | --- | --- | --- | --- |
@@ -201,7 +248,7 @@ Pedido recebido com sucesso
 | `items[].productId` | Obrigatório e representado por UUID |
 | `items[].quantity` | Deve ser maior que zero |
 
-O `@Valid` no método HTTP ativa a validação do request. Outro `@Valid` na lista ativa a validação em cascata de cada item.
+O `@Valid` no método HTTP ativa a validação do request e a validação em cascata dos itens.
 
 ## OpenAPI e Swagger UI
 
@@ -213,69 +260,17 @@ Com a aplicação em execução nas configurações padrão:
 - OpenAPI JSON: `http://localhost:8080/v3/api-docs`
 - OpenAPI YAML: `http://localhost:8080/v3/api-docs.yaml`
 
-## Eventos entre módulos
+## Persistência
 
-### Evento publicado
+O domínio não possui anotações do Spring Data JDBC. O mapeamento relacional fica exclusivamente no adaptador de saída:
 
-Após persistir o agregado, `OrderService` chama o método privado `publishOrderCreatedEvent` e publica `OrderCreatedEvent` através do `ApplicationEventPublisher`. A persistência e a publicação estão dentro da mesma transação. O evento contém:
+- `OrderJdbcEntity` representa `orders.orders` e é a raiz do agregado JDBC;
+- `OrderItemJdbcEntity` representa `orders.order_items`;
+- `SpringDataOrderRepository` é o `CrudRepository` técnico;
+- `OrderPersistenceMapper` converte domínio e entidades nos dois sentidos;
+- `OrderPersistenceAdapter` implementa a porta `OrderRepository` usada pelo caso de uso.
 
-| Campo | Tipo | Finalidade |
-| --- | --- | --- |
-| `orderId` | `UUID` | Identificador gerado pelo servidor |
-| `createdAt` | `Instant` | Instante da criação gerado pelo servidor |
-| `customerId` | `UUID` | Cliente do pedido |
-| `paymentMethod` | `String` | Forma de pagamento recebida |
-| `items` | `List<Item>` | Produtos e respectivas quantidades |
-
-A lista do evento é copiada com `List.copyOf`, evitando alteração posterior da coleção publicada.
-
-### Consumo no inventory
-
-`InventoryOrderCreatedListener` utiliza `@ApplicationModuleListener(id = "inventory.reserve-items-on-order-created")` para receber `OrderCreatedEvent` após a confirmação da transação de origem. O identificador explícito torna a coluna `listener_id` mais legível e deve permanecer estável. O listener não implementa a regra de estoque; ele adapta o evento para `InventoryService.ItemReservation` e delega para `InventoryService.reserveItems`.
-
-`InventoryService` atualmente:
-
-- valida o identificador do pedido;
-- valida a existência dos itens;
-- valida produto e quantidade de cada reserva;
-- registra no log a intenção de reserva.
-
-Ainda não existe alteração ou persistência real de estoque.
-
-### Registro persistente de eventos
-
-O projeto utiliza `spring-modulith-starter-jdbc`. A propriedade abaixo está habilitada no ambiente atual:
-
-```yaml
-spring:
-  modulith:
-    events:
-      jdbc:
-        schema-initialization:
-          enabled: true
-```
-
-Ela permite ao Spring Modulith criar a estrutura JDBC utilizada para registrar publicações destinadas a listeners transacionais. A criação automática é conveniente em desenvolvimento. Em produção, essa estrutura deve ser criada por uma migration versionada.
-
-## Persistência e ambiente local
-
-O `compose.yaml` declara um PostgreSQL para desenvolvimento, publicado em `localhost:5433`, pois a porta `5432` já é utilizada por outro projeto local. As credenciais atuais são:
-
-| Configuração | Valor |
-| --- | --- |
-| Banco | `ordermod` |
-| Usuário | `myuser` |
-| Senha | `1234` |
-| Porta do host | `5433` |
-
-O Flyway controla a evolução do banco. Como `event_publication` já existia antes da adoção do Flyway, a aplicação cria um baseline na versão `0`. A migration `V1__create_order_tables.sql` cria:
-
-```text
-orders.orders
-orders.order_items
-```
-
-O esquema relacional é:
+O esquema relacional versionado pelo Flyway é:
 
 ```text
 orders.orders
@@ -293,50 +288,69 @@ orders.order_items
 └── item_index INTEGER
 ```
 
-`Order` é a raiz do agregado e possui uma coleção imutável de `OrderItem`. `OrderRepository` estende `CrudRepository<Order, UUID>`. O `@MappedCollection` usa `order_id` como chave estrangeira e `item_index` para preservar a ordem da lista. O `@Version` permite distinguir um agregado novo mesmo com UUID gerado pela aplicação e prepara o modelo para controle otimista de concorrência.
+`@MappedCollection` configura `order_id` como chave estrangeira e `item_index` como a posição da lista. `@Version` permite ao Spring Data JDBC distinguir um agregado novo, mesmo com UUID gerado pela aplicação, e oferece controle otimista de concorrência.
 
-No caso de uso `createOrder`, o pedido e seus itens são persistidos antes da publicação. Como ambas as operações estão em `@Transactional`, uma falha antes do commit desfaz a persistência e o registro da publicação.
+No ambiente local, o PostgreSQL do `compose.yaml` é publicado em `localhost:5433`. As credenciais de desenvolvimento atuais são banco `ordermod`, usuário `myuser` e senha `1234`.
 
-Ainda não existem modelo ou persistência de estoque nem persistência do módulo `payment`.
+Nos testes de integração, `PostgresTestcontainersConfiguration` fornece um PostgreSQL `18.6` isolado através de `@ServiceConnection`. O Docker Compose da aplicação é desabilitado nesse contexto, e o container efêmero recebe a migration Flyway antes dos testes de persistência.
 
-## Testes atuais
+## Eventos e transação
 
-| Teste | Cobertura atual |
+`CreateOrderService.createOrder` é transacional. Dentro do mesmo limite, o serviço:
+
+1. cria o agregado de domínio;
+2. persiste através da porta `OrderRepository`;
+3. cria `OrderCreatedEvent` a partir do agregado persistido;
+4. publica através da porta `OrderEventPublisher`.
+
+`SpringOrderEventPublisher` é o único adaptador que conhece `ApplicationEventPublisher`. Assim, o caso de uso não depende diretamente da API técnica de publicação do Spring.
+
+O Spring Modulith registra em `event_publication` as publicações destinadas aos listeners transacionais. A propriedade de inicialização automática do esquema JDBC continua adequada ao desenvolvimento; em produção, essa estrutura deve ser criada por migration versionada.
+
+`InventoryOrderCreatedListener` usa o identificador estável `inventory.reserve-items-on-order-created`. O listener adapta o evento e delega para `InventoryService.reserveItems`. `InventoryService` ainda apenas valida os dados e registra a intenção no log. O módulo `notification` também reage ao evento; `payment` permanece sem comportamento.
+
+Como persistência e publicação são chamadas dentro da transação do caso de uso, uma falha antes do commit causa rollback do pedido, dos itens e do registro da publicação. `CreateOrderTransactionIntegrationTest` protege esse comportamento simulando uma falha depois de delegar a publicação ao Spring e verificando que as três contagens permanecem inalteradas.
+
+## Testes automatizados
+
+A suíte cobre níveis diferentes da arquitetura e do fluxo:
+
+| Nível | Testes e cobertura |
 | --- | --- |
-| `OrdermodApplicationTests` | Carregamento do contexto Spring |
-| `ModularityTests` | Fronteiras, ciclos e acessos entre módulos com `ApplicationModules.verify()` |
-| `OrderServiceTest` | Persistência antes da publicação e equivalência entre agregado e evento |
-| `OrderTest` | Imutabilidade dos itens, normalização e invariantes do pedido |
-| `OrderItemTest` | Quantidade positiva dos itens |
+| Módulos | `ModularityTests` executa `ApplicationModules.verify()` para detectar ciclos e acessos indevidos entre módulos |
+| Hexagonal | `HexagonalArchitectureTests` aplica quatro regras ArchUnit sobre domínio, aplicação, portas e adaptadores de entrada |
+| Domínio | `OrderTest` e `OrderItemTest` verificam invariantes, normalização e imutabilidade sem Spring |
+| Caso de uso | `CreateOrderServiceTest` verifica `save` antes de `publish`, conteúdo do evento, resultado e falhas das portas |
+| Adaptador HTTP | `OrderControllerTest` verifica o mapeamento; `OrderControllerHttpTest` usa MockMvc standalone para validar `201`, texto de sucesso e `400` |
+| Mapper e eventos | `OrderPersistenceMapperTest` verifica as conversões; `SpringOrderEventPublisherTest` verifica a delegação técnica |
+| Persistência | `OrderPersistenceAdapterTest` usa PostgreSQL 18.6 isolado, migration V1, INSERT com versão `0`, índices `0/1` e UPDATE com versão `1` |
+| Integração de eventos | `CreateOrderIntegrationTest` comprova pedido, itens e duas publicações `COMPLETED`, para `inventory` e `notification` |
+| Transação | `CreateOrderTransactionIntegrationTest` comprova rollback de pedido, itens e `event_publication` após falha simulada |
+| Contexto | `OrdermodApplicationTests` comprova o carregamento da aplicação com o PostgreSQL de teste |
 
-O teste de `OrderService` usa um repositório falso e um capturador simples de eventos, sem inicializar o contexto Spring nem o banco de dados. Os cinco testes unitários específicos passam com Java 25. O teste geral de contexto ainda precisa receber uma configuração de banco própria para a execução de testes.
+Em 01/09/2026, `./mvnw clean test` foi executado com Java 25: 27 testes, sem falhas, erros ou testes ignorados, com `BUILD SUCCESS`.
 
-## Decisões arquiteturais atuais
+## Decisões arquiteturais
 
-1. **Monólito modular:** os módulos permanecem no mesmo deploy, mas possuem fronteiras lógicas.
-2. **Organização por negócio:** `order`, `inventory` e `payment` representam capacidades, não camadas globais.
-3. **Encapsulamento:** somente tipos no pacote raiz do módulo formam a API Java pública.
-4. **Integração por eventos:** `order` não chama diretamente um serviço interno de `inventory`.
-5. **DTO separado do comando:** o contrato HTTP não chega à camada de aplicação.
-6. **Evento separado do comando:** outros módulos recebem um fato público, não um tipo interno de `order`.
-7. **Listener separado do service:** o listener adapta a mensagem; o service representa o caso de uso de estoque.
-8. **Contrato HTTP separado:** `OrderHttpApi` concentra REST e OpenAPI; `OrderController` implementa o comportamento.
-9. **Dados gerados pelo servidor:** `orderId` e `createdAt` não são aceitos do cliente.
-10. **Agregado explícito:** `Order` controla seus `OrderItem` e é persistido por um único repositório.
-11. **Banco versionado:** alterações de estrutura são feitas por migrations Flyway.
-12. **Persistência antes do evento:** `OrderCreatedEvent` somente é publicado depois de `OrderRepository.save`.
-13. **Transação única de origem:** pedido, itens e publicação persistente confirmam ou sofrem rollback juntos.
+1. **Monólito modular:** os módulos permanecem no mesmo deploy, com fronteiras verificáveis.
+2. **Hexagonal dentro de `order`:** o módulo continua orientado ao negócio e organiza internamente entradas, núcleo e saídas.
+3. **API pública mínima:** somente `OrderCreatedEvent` é compartilhado por `order`.
+4. **Domínio puro:** `Order` e `OrderItem` não dependem de Spring ou JDBC.
+5. **Porta de entrada explícita:** o controller depende de `CreateOrderUseCase`, não da classe concreta do serviço.
+6. **Portas de saída explícitas:** persistência e eventos são capacidades solicitadas pela aplicação.
+7. **Adaptadores técnicos isolados:** Spring MVC, Spring Data JDBC e `ApplicationEventPublisher` ficam nas bordas.
+8. **Modelos separados:** request, comando, domínio, entidades JDBC e evento não são reutilizados entre fronteiras.
+9. **Persistência antes do evento:** o fato público usa os dados retornados pelo repositório.
+10. **Transação única de origem:** pedido, itens e registro da publicação confirmam ou sofrem rollback juntos.
+11. **Contrato HTTP preservado:** a reorganização interna não altera caminho, validação, status ou mensagem.
+12. **Banco versionado:** alterações no esquema de negócio são feitas por migrations Flyway.
 
 ## Limitações e próximos passos
 
-O estado atual persiste e publica a criação de pedidos, mas ainda não representa um fluxo de compra completo. Os próximos passos recomendados são:
-
 1. Retornar o `orderId` ou o cabeçalho `Location` na resposta `201 Created`.
 2. Implementar reserva e persistência real no módulo `inventory`.
-3. Implementar o módulo `payment` e seu listener para o evento do pedido.
-4. Criar migrations para estoque e para a estrutura do registro de eventos.
-5. Definir eventos de sucesso e falha, como estoque reservado ou estoque indisponível.
+3. Implementar o módulo `payment` e sua reação aos eventos do pedido.
+4. Tornar os consumidores idempotentes para suportar reprocessamento.
+5. Criar migration da estrutura de publicação do Spring Modulith para produção.
 6. Padronizar respostas de erro com `@RestControllerAdvice`.
-7. Configurar um PostgreSQL isolado para os testes de integração.
-8. Adicionar testes HTTP, de persistência e dos listeners.
-9. Fixar uma versão específica da imagem PostgreSQL em vez de usar `latest`.
+7. Fixar uma versão específica da imagem PostgreSQL de desenvolvimento e externalizar credenciais.
