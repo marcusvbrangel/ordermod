@@ -1,4 +1,4 @@
-package com.market.order.internal.application;
+package com.market.order.internal.application.port.in;
 
 import java.util.List;
 import java.util.UUID;

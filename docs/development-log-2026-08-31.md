@@ -1,5 +1,7 @@
 # Registro de desenvolvimento — 31/08/2026
 
+> Este arquivo preserva o estado do projeto em 31/08/2026. A organização de pacotes e persistência descrita aqui foi posteriormente substituída pela arquitetura hexagonal registrada em [01/09/2026](development-log-2026-09-01.md).
+
 ## Resultado do dia
 
 O fluxo de criação de pedidos deixou de apenas publicar um evento e passou a persistir o agregado completo no PostgreSQL antes da publicação. A gravação do pedido, dos itens e da publicação do evento ocorre sob a transação iniciada por `OrderService.createOrder`.

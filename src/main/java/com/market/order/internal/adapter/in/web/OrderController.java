@@ -1,7 +1,7 @@
-package com.market.order.internal.web;
+package com.market.order.internal.adapter.in.web;
 
-import com.market.order.internal.application.CreateOrderCommand;
-import com.market.order.internal.application.OrderService;
+import com.market.order.internal.application.port.in.CreateOrderCommand;
+import com.market.order.internal.application.port.in.CreateOrderUseCase;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
@@ -9,10 +9,10 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class OrderController implements OrderHttpApi {
 
-    private final OrderService orderService;
+    private final CreateOrderUseCase createOrderUseCase;
 
-    public OrderController(OrderService orderService) {
-        this.orderService = orderService;
+    public OrderController(CreateOrderUseCase createOrderUseCase) {
+        this.createOrderUseCase = createOrderUseCase;
     }
 
     @Override
@@ -28,7 +28,7 @@ public class OrderController implements OrderHttpApi {
                         .toList()
         );
 
-        orderService.createOrder(command);
+        createOrderUseCase.createOrder(command);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)

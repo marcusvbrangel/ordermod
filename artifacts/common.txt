@@ -116,6 +116,112 @@ git push -u origin main
 ------------------------------------------------------------
 
 
+Sugiro uma arquitetura hexagonal pragmática: domínio puro, aplicação definida por portas e tecnologias concentradas em adaptadores.
+
+com/market/order
+├── OrderCreatedEvent.java                  # API pública do módulo
+├── package-info.java
+└── internal
+    ├── domain
+    │   ├── model
+    │   │   ├── Order.java
+    │   │   └── OrderItem.java
+    │   ├── exception
+    │   │   └── OrderDomainException.java
+    │   └── package-info.java
+    │
+    ├── application
+    │   ├── port
+    │   │   ├── in
+    │   │   │   ├── CreateOrderUseCase.java
+    │   │   │   ├── CreateOrderCommand.java
+    │   │   │   └── CreateOrderResult.java
+    │   │   └── out
+    │   │       ├── OrderRepository.java
+    │   │       └── OrderEventPublisher.java
+    │   ├── service
+    │   │   └── CreateOrderService.java
+    │   └── package-info.java
+    │
+    └── adapter
+        ├── in
+        │   └── web
+        │       ├── CreateOrderRequest.java
+        │       ├── OrderController.java
+        │       └── OrderHttpApi.java
+        │
+        └── out
+            ├── persistence
+            │   └── jdbc
+            │       ├── OrderPersistenceAdapter.java
+            │       ├── SpringDataOrderRepository.java
+            │       ├── OrderJdbcEntity.java
+            │       ├── OrderItemJdbcEntity.java
+            │       └── OrderPersistenceMapper.java
+            │
+            └── event
+                └── SpringOrderEventPublisher.java
+
+
+
+A direção das dependências será:
+
+OrderController
+    → CreateOrderUseCase
+        ← CreateOrderService
+            → domínio
+            → OrderRepository
+            → OrderEventPublisher
+
+OrderPersistenceAdapter
+    → implementa OrderRepository
+
+SpringOrderEventPublisher
+    → implementa OrderEventPublisher
+
+
+------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+------------------------------------------------------------
+
+
+
+
+
+
+
+
+------------------------------------------------------------
+
+
+
+
+
+------------------------------------------------------------
+
+
+
+
 
 
 

@@ -2,6 +2,8 @@
 
 Data da avaliação: 31/08/2026
 
+Atualização arquitetural: 01/09/2026
+
 ## Avaliação geral
 
 A arquitetura está sólida e coerente para um monólito modular. As decisões principais combinam bem entre si e o projeto não está excessivamente complicado.
@@ -11,11 +13,11 @@ O fluxo atual está bem definido:
 ```text
 HTTP
     → Controller
-    → Command
-    → OrderService
-    → OrderRepository
-    → PostgreSQL
-    → OrderCreatedEvent
+    → CreateOrderUseCase
+    → CreateOrderService
+    → portas de saída
+    → adaptadores JDBC e de eventos
+    → PostgreSQL / OrderCreatedEvent
     → Inventory/Notification
 ```
 
@@ -31,39 +33,57 @@ HTTP
 - Identificadores explícitos para os listeners.
 - Documentação arquitetural acompanhando a implementação.
 - Regras básicas protegidas pelo próprio domínio.
+- Violações de invariantes representadas por `OrderDomainException` em `domain.exception`.
+- Domínio sem dependências de Spring Data JDBC.
+- Portas de entrada e saída explícitas.
+- Modelos de domínio e persistência separados por um mapper.
+- Controllers dependentes do caso de uso, não da implementação concreta.
+- Regras hexagonais fiscalizadas por quatro testes ArchUnit.
+- PostgreSQL 18.6 isolado para testes através de Testcontainers.
+- Persistência, publicação durável e rollback protegidos por testes de integração.
+- Contrato HTTP protegido com MockMvc standalone.
 
-## Decisão arquitetural a manter consciente
+## Evolução para arquitetura hexagonal
 
-Atualmente:
+A separação que antes era uma possibilidade foi implementada dentro do módulo `order`:
 
 ```text
-OrderService
-    → importa OrderRepository de infrastructure
-
-Order
-    → possui anotações do Spring Data JDBC
+adapter.in.web
+    → application.port.in
+    → application.service
+    → domain.model
+    → application.port.out
+    ← adapter.out.persistence.jdbc
+    ← adapter.out.event
 ```
 
-Isso é aceitável para uma arquitetura pragmática com Spring Data JDBC, mas não representa uma arquitetura hexagonal estrita.
+Agora:
 
-Em uma arquitetura estritamente hexagonal:
+- `CreateOrderUseCase` representa a porta de entrada;
+- `OrderRepository` e `OrderEventPublisher` representam portas de saída;
+- `CreateOrderService` orquestra o caso de uso;
+- `Order` e `OrderItem` formam um domínio puro;
+- entidades JDBC e o `CrudRepository` ficam no adaptador de persistência;
+- `OrderPersistenceMapper` traduz domínio e representação relacional;
+- `SpringOrderEventPublisher` isola a integração com os eventos do Spring.
 
-- a interface `OrderRepository` ficaria em `domain` ou `application`;
-- a infraestrutura implementaria essa interface;
-- o domínio não teria anotações de persistência;
-- poderia existir um modelo relacional separado.
+Essa organização adiciona mais tipos, mas torna explícita a direção das dependências e permite testar o núcleo através das portas. A regra a preservar é que o domínio e a aplicação não passem a depender de controllers, entidades JDBC ou implementações técnicas.
 
-Para o tamanho atual do projeto, a recomendação é manter a solução pragmática. Separar modelos e criar adaptadores adicionais agora provavelmente adicionaria mais código do que benefício.
+O módulo Spring Modulith continua sendo `com.market.order`; a arquitetura hexagonal organiza o interior do módulo e não cria um novo módulo nem um microsserviço.
 
 ## Plano priorizado
 
 ### Prioridade alta
 
 - [x] Criar teste arquitetural com `ApplicationModules.verify()`.
-- [ ] Configurar um PostgreSQL isolado para os testes.
-- [ ] Criar teste de integração da persistência de `Order` e `OrderItem`.
-- [ ] Testar rollback do pedido e da publicação persistente.
-- [ ] Testar a integração do evento com os módulos consumidores.
+- [x] Adicionar regras ArchUnit para a arquitetura hexagonal interna.
+- [x] Separar domínio, portas e adaptadores no módulo `order`.
+- [x] Manter `OrderCreatedEvent` como API pública do módulo.
+- [x] Configurar um PostgreSQL isolado para os testes.
+- [x] Criar teste de integração da persistência de `Order` e `OrderItem`.
+- [x] Testar rollback do pedido e da publicação persistente.
+- [x] Testar a integração do evento com os módulos consumidores.
+- [x] Testar o contrato HTTP de sucesso e validação.
 
 ### Prioridade média
 
@@ -78,19 +98,25 @@ Para o tamanho atual do projeto, a recomendação é manter a solução pragmát
 - [ ] Padronizar o formato dos IDs de todos os listeners.
 - [ ] Fixar uma versão específica da imagem PostgreSQL.
 - [ ] Externalizar as credenciais do PostgreSQL.
-- [ ] Atualizar a documentação arquitetural com o módulo `notification`.
+- [x] Atualizar a documentação arquitetural com o módulo `notification`.
 - [ ] Corrigir a mensagem de log de `NotificationOrderCreatedListener`, que ainda menciona itens de estoque.
 
 ## Riscos atuais
 
-O maior risco não está na organização das pastas, mas na cobertura de integração:
+Os principais riscos técnicos da refatoração foram reduzidos pela suíte automatizada:
 
-- o teste geral de contexto ainda não possui banco próprio;
+- `ApplicationModules.verify()` e quatro regras ArchUnit protegem as fronteiras;
+- Testcontainers valida a persistência contra PostgreSQL real e a migration V1;
+- os testes de integração comprovam publicação durável e rollback conjunto;
+- MockMvc protege o contrato HTTP atual.
+
+Permanecem riscos de evolução do negócio:
+
 - os listeners ainda não possuem garantia de idempotência;
 - `InventoryService.reserveItems` ainda não persiste uma reserva real.
 
-Essas proteções devem ser implementadas antes que mais regras de negócio e módulos sejam adicionados.
+Também permanece necessária uma estratégia de migration para a tabela de publicações em produção.
 
 ## Conclusão
 
-A fundação arquitetural está boa, o fluxo transacional está correto e as fronteiras estão claras. A próxima evolução deve priorizar testes, idempotência e regras de negócio, sem introduzir novas abstrações ou reorganizações de pastas sem uma necessidade concreta.
+A refatoração tornou as fronteiras internas de `order` mais explícitas sem alterar sua fronteira pública no Spring Modulith. O projeto agora possui uma base hexagonal coerente e verificada: domínio puro, aplicação orientada a portas e detalhes técnicos nas bordas. A execução final de `./mvnw clean test` com Java 25 concluiu 27 testes sem falhas, erros ou testes ignorados. A próxima evolução pode concentrar-se em idempotência, persistência de estoque e regras de pagamento.

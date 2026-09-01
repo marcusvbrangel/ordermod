@@ -1,4 +1,4 @@
 /**
- * Domain model of the order module.
+ * Domain layer of the order module.
  */
 package com.market.order.internal.domain;
