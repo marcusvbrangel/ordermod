@@ -304,6 +304,7 @@ Ainda não existem modelo ou persistência de estoque nem persistência do módu
 | Teste | Cobertura atual |
 | --- | --- |
 | `OrdermodApplicationTests` | Carregamento do contexto Spring |
+| `ModularityTests` | Fronteiras, ciclos e acessos entre módulos com `ApplicationModules.verify()` |
 | `OrderServiceTest` | Persistência antes da publicação e equivalência entre agregado e evento |
 | `OrderTest` | Imutabilidade dos itens, normalização e invariantes do pedido |
 | `OrderItemTest` | Quantidade positiva dos itens |
@@ -336,7 +337,6 @@ O estado atual persiste e publica a criação de pedidos, mas ainda não represe
 4. Criar migrations para estoque e para a estrutura do registro de eventos.
 5. Definir eventos de sucesso e falha, como estoque reservado ou estoque indisponível.
 6. Padronizar respostas de erro com `@RestControllerAdvice`.
-7. Adicionar teste de fronteiras com `ApplicationModules.verify()`.
-8. Configurar um PostgreSQL isolado para os testes de integração.
-9. Adicionar testes HTTP, de persistência e dos listeners.
-10. Fixar uma versão específica da imagem PostgreSQL em vez de usar `latest`.
+7. Configurar um PostgreSQL isolado para os testes de integração.
+8. Adicionar testes HTTP, de persistência e dos listeners.
+9. Fixar uma versão específica da imagem PostgreSQL em vez de usar `latest`.
