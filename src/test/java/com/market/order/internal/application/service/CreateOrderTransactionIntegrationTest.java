@@ -17,6 +17,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
@@ -43,8 +44,9 @@ class CreateOrderTransactionIntegrationTest {
         var publicationsBefore = count("event_publication");
         var command = new CreateOrderCommand(
                 UUID.randomUUID(),
-                "PIX",
-                List.of(new CreateOrderCommand.Item(UUID.randomUUID(), 2))
+                "CREDIT_CARD",
+                "BRL",
+                List.of(new CreateOrderCommand.Item(UUID.randomUUID(), 2, new BigDecimal("10.50")))
         );
 
         assertThrows(PublicationFailure.class, () -> useCase.createOrder(command));
@@ -82,10 +84,15 @@ class CreateOrderTransactionIntegrationTest {
                     placedEvent.occurredAt(),
                     placedEvent.customerId().value(),
                     placedEvent.paymentMethod().value(),
+                    placedEvent.status().name(),
+                    placedEvent.total().amount(),
+                    placedEvent.total().currency(),
                     placedEvent.items().stream()
                             .map(item -> new OrderCreatedEvent.Item(
                                     item.productId().value(),
-                                    item.quantity().value()
+                                    item.quantity().value(),
+                                    item.unitPrice().amount(),
+                                    item.subtotal().amount()
                             ))
                             .toList()
             );

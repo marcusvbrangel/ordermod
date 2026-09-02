@@ -3,13 +3,16 @@ package com.market.order.internal.adapter.out.event;
 import com.market.order.OrderCreatedEvent;
 import com.market.order.internal.domain.event.OrderPlacedDomainEvent;
 import com.market.order.internal.domain.model.CustomerId;
+import com.market.order.internal.domain.model.Money;
 import com.market.order.internal.domain.model.OrderId;
+import com.market.order.internal.domain.model.OrderStatus;
 import com.market.order.internal.domain.model.PaymentMethod;
 import com.market.order.internal.domain.model.ProductId;
 import com.market.order.internal.domain.model.Quantity;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -32,10 +35,14 @@ class SpringOrderEventPublisherTest {
                 new OrderId(orderId),
                 occurredAt,
                 new CustomerId(customerId),
-                new PaymentMethod("PIX"),
+                new PaymentMethod("CREDIT_CARD"),
+                OrderStatus.AGUARDANDO_ESTOQUE,
+                money("21.00"),
                 List.of(new OrderPlacedDomainEvent.Item(
                         new ProductId(productId),
-                        new Quantity(2)
+                        new Quantity(2),
+                        money("10.50"),
+                        money("21.00")
                 ))
         );
 
@@ -46,10 +53,22 @@ class SpringOrderEventPublisherTest {
                         orderId,
                         occurredAt,
                         customerId,
-                        "PIX",
-                        List.of(new OrderCreatedEvent.Item(productId, 2))
+                        "CREDIT_CARD",
+                        "AGUARDANDO_ESTOQUE",
+                        new BigDecimal("21.00"),
+                        "BRL",
+                        List.of(new OrderCreatedEvent.Item(
+                                productId,
+                                2,
+                                new BigDecimal("10.50"),
+                                new BigDecimal("21.00")
+                        ))
                 ),
                 publishedObject.get()
         );
+    }
+
+    private static Money money(String amount) {
+        return new Money(new BigDecimal(amount), "BRL");
     }
 }

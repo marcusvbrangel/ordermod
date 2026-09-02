@@ -1,22 +1,18 @@
-package com.market.order;
+package com.market.order.internal.adapter.in.web;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
-public record OrderCreatedEvent(
+public record CreateOrderResponse(
         UUID orderId,
-        Instant createdAt,
-        UUID customerId,
-        String paymentMethod,
         String status,
         BigDecimal totalAmount,
         String currency,
         List<Item> items
 ) {
 
-    public OrderCreatedEvent {
+    public CreateOrderResponse {
         items = List.copyOf(items);
     }
 

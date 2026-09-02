@@ -109,7 +109,8 @@ Uma validação HTTP melhora a mensagem para o cliente, mas não substitui essas
 var item = OrderItem.create(
         new OrderItemId(itemId),
         new ProductId(productId),
-        new Quantity(2)
+        new Quantity(2),
+        new Money(new BigDecimal("10.50"), "BRL")
 );
 ```
 
@@ -117,11 +118,11 @@ O item pertence à fronteira do agregado `Order`. Ter identidade não significa 
 
 As factories `create(...)` e `reconstitute(...)` deixam explícita a intenção da chamada. Hoje ambas aplicam as mesmas invariantes, mas seus nomes permitem que criação e hidratação evoluam separadamente se o modelo passar a exigir isso.
 
-## 5. Os seis Value Objects
+## 5. Os Value Objects
 
 Um **Value Object** é definido pelo seu valor, não por uma identidade própria. Ele costuma ser imutável, validar-se na construção e substituir tipos primitivos que perderam significado no modelo.
 
-O projeto implementa exatamente seis Value Objects:
+O projeto implementa sete Value Objects:
 
 | Value Object | Valor encapsulado | Regra atual |
 | --- | --- | --- |
@@ -131,6 +132,7 @@ O projeto implementa exatamente seis Value Objects:
 | `ProductId` | `UUID` | não pode ser nulo |
 | `Quantity` | `int` | deve ser maior que zero |
 | `PaymentMethod` | `String` | obrigatório, remove espaços nas pontas e não aceita vazio |
+| `Money` | `BigDecimal` e código de moeda | valor não negativo, precisão decimal, moeda válida e aritmética entre moedas iguais |
 
 Eles são records Java. Isso fornece imutabilidade dos componentes e igualdade por valor, duas características naturais de Value Objects.
 
@@ -178,6 +180,10 @@ Depois que um método recebe `Quantity`, ele não precisa perguntar novamente se
 
 Ele ainda não restringe os valores a uma lista como `PIX` ou `CREDIT_CARD`. Essa é uma limitação consciente: sem uma regra de negócio definida, transformar o tipo em enum inventaria conhecimento que o projeto ainda não possui.
 
+### 5.4 `Money`
+
+`Money` mantém valor decimal e moeda juntos. O Value Object normaliza a escala para duas casas sem arredondamento silencioso, limita a precisão compatível com `NUMERIC(19,2)` e impede somas entre moedas diferentes. `OrderItem` multiplica o preço unitário pela quantidade; `Order` soma os subtotais.
+
 ## 6. Criação não é reconstituição
 
 Uma das decisões mais importantes do modelo é separar dois motivos para obter um `Order`.
@@ -198,8 +204,9 @@ var order = Order.place(
 
 Além de validar o estado, ele:
 
-1. cria o agregado com `version = null`;
-2. registra um `OrderPlacedDomainEvent` na coleção interna de eventos.
+1. calcula o total a partir dos subtotais;
+2. inicia o pedido em `AGUARDANDO_ESTOQUE` e com `version = null`;
+3. registra um `OrderPlacedDomainEvent` com a fotografia comercial na coleção interna de eventos.
 
 O nome `place` expressa uma ação do domínio melhor do que um construtor genérico. O retorno é um pedido novo e um fato novo ocorreu.
 
@@ -212,6 +219,8 @@ return Order.reconstitute(
         new OrderId(entity.id()),
         new CustomerId(entity.customerId()),
         new PaymentMethod(entity.paymentMethod()),
+        OrderStatus.valueOf(entity.status()),
+        new Money(entity.totalAmount(), entity.currency()),
         entity.createdAt(),
         entity.version(),
         items
@@ -411,8 +420,7 @@ Este estudo não tenta implementar todo o catálogo de DDD. Não foram adicionad
 - Specification: não há regra de seleção complexa que justifique o padrão;
 - factory class separada: métodos nomeados como `place`, `create` e `reconstitute` são suficientes;
 - repository para `OrderItem`: isso quebraria a fronteira escolhida do agregado;
-- estados e transições do pedido: o negócio ainda não definiu cancelamento, aprovação ou rejeição;
-- objetos monetários: preço, moeda e total ainda não fazem parte do modelo;
+- transições posteriores do pedido: o estado inicial existe, mas confirmação, cancelamento e expiração ainda dependem dos módulos seguintes;
 - implementação completa de DDD estratégico: um módulo Spring Modulith é uma boa fronteira técnica, mas não se torna automaticamente um Bounded Context descoberto com especialistas do negócio;
 - portas para relógio e geração de IDs: `Instant.now()` e `UUID.randomUUID()` continuam no serviço de aplicação como escolha pragmática.
 
@@ -428,8 +436,10 @@ Os testes do modelo devem demonstrar o comportamento, não apenas getters:
 - cada identificador tipado rejeita `null`;
 - `Quantity` rejeita zero e valores negativos;
 - `PaymentMethod` normaliza espaços e rejeita texto vazio;
+- `Money` protege escala, precisão e moeda, e não usa ponto flutuante binário;
+- `OrderItem` calcula o subtotal e `Order` calcula o total e o estado inicial;
 - listas recebidas pelo agregado e pelo evento não podem alterar seu estado depois da criação;
-- o mapper desembrulha e recompõe os seis Value Objects;
+- o mapper desembrulha e recompõe os Value Objects e a fotografia comercial;
 - a reconstituição feita pelo mapper não cria Domain Events;
 - o serviço persiste antes de despachar o evento interno e só o limpa depois do sucesso;
 - o adaptador de eventos converte `OrderPlacedDomainEvent` no `OrderCreatedEvent` correto.
@@ -439,7 +449,7 @@ A implementação foi validada desde uma compilação limpa com Java 25 e Postgr
 ```text
 ./mvnw clean test
 
-Tests run: 45, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 50, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 

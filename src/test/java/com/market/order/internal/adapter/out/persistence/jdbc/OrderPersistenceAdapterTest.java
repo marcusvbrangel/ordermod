@@ -2,10 +2,12 @@ package com.market.order.internal.adapter.out.persistence.jdbc;
 
 import com.market.PostgresTestcontainersConfiguration;
 import com.market.order.internal.domain.model.CustomerId;
+import com.market.order.internal.domain.model.Money;
 import com.market.order.internal.domain.model.Order;
 import com.market.order.internal.domain.model.OrderId;
 import com.market.order.internal.domain.model.OrderItem;
 import com.market.order.internal.domain.model.OrderItemId;
+import com.market.order.internal.domain.model.OrderStatus;
 import com.market.order.internal.domain.model.PaymentMethod;
 import com.market.order.internal.domain.model.ProductId;
 import com.market.order.internal.domain.model.Quantity;
@@ -19,6 +21,7 @@ import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabas
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -26,6 +29,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -70,6 +74,9 @@ class OrderPersistenceAdapterTest {
                         order.id().value(),
                         order.customerId().value(),
                         order.paymentMethod().value(),
+                        order.status().name(),
+                        order.total().amount(),
+                        order.total().currency(),
                         order.createdAt(),
                         0
                 ),
@@ -81,7 +88,7 @@ class OrderPersistenceAdapterTest {
         );
 
         assertNotNull(flyway.info().current());
-        assertEquals("1", flyway.info().current().getVersion().getVersion());
+        assertEquals("2", flyway.info().current().getVersion().getVersion());
     }
 
     @Test
@@ -92,7 +99,10 @@ class OrderPersistenceAdapterTest {
                 savedOrder.id(),
                 savedOrder.customerId(),
                 new PaymentMethod("CREDIT_CARD"),
+                savedOrder.status(),
+                savedOrder.total(),
                 savedOrder.createdAt(),
+                savedOrder.cancelledAt(),
                 savedOrder.version(),
                 savedOrder.items()
         );
@@ -113,6 +123,9 @@ class OrderPersistenceAdapterTest {
                         result.id().value(),
                         result.customerId().value(),
                         "CREDIT_CARD",
+                        result.status().name(),
+                        result.total().amount(),
+                        result.total().currency(),
                         result.createdAt(),
                         1
                 ),
@@ -122,6 +135,24 @@ class OrderPersistenceAdapterTest {
                 expectedStoredItems(result),
                 storedItems(result.id())
         );
+    }
+
+    @Test
+    void findsAnExistingAggregateWithItsOrderedItemsAndWithoutDomainEvents() {
+        var savedOrder = adapter.save(newOrder());
+
+        var foundOrder = adapter.findById(savedOrder.id());
+
+        assertTrue(foundOrder.isPresent());
+        assertAll(
+                () -> assertAggregateState(savedOrder, 0, foundOrder.orElseThrow()),
+                () -> assertTrue(foundOrder.orElseThrow().domainEvents().isEmpty())
+        );
+    }
+
+    @Test
+    void returnsEmptyWhenAggregateDoesNotExist() {
+        assertFalse(adapter.findById(new OrderId(UUID.randomUUID())).isPresent());
     }
 
     private int count(String table, OrderId orderId) {
@@ -135,7 +166,7 @@ class OrderPersistenceAdapterTest {
 
     private StoredOrder storedOrder(OrderId orderId) {
         return jdbcClient.sql("""
-                        SELECT id, customer_id, payment_method, created_at, version
+                        SELECT id, customer_id, payment_method, status, total_amount, currency, created_at, version
                         FROM orders.orders
                         WHERE id = :orderId
                         """)
@@ -144,6 +175,9 @@ class OrderPersistenceAdapterTest {
                         resultSet.getObject("id", UUID.class),
                         resultSet.getObject("customer_id", UUID.class),
                         resultSet.getString("payment_method"),
+                        resultSet.getString("status"),
+                        resultSet.getBigDecimal("total_amount"),
+                        resultSet.getString("currency").trim(),
                         resultSet.getObject("created_at", OffsetDateTime.class).toInstant(),
                         resultSet.getInt("version")
                 ))
@@ -152,7 +186,7 @@ class OrderPersistenceAdapterTest {
 
     private List<StoredItem> storedItems(OrderId orderId) {
         return jdbcClient.sql("""
-                        SELECT id, order_id, product_id, quantity, item_index
+                        SELECT id, order_id, product_id, quantity, unit_price, subtotal, item_index
                         FROM orders.order_items
                         WHERE order_id = :orderId
                         ORDER BY item_index
@@ -163,6 +197,8 @@ class OrderPersistenceAdapterTest {
                         resultSet.getObject("order_id", UUID.class),
                         resultSet.getObject("product_id", UUID.class),
                         resultSet.getInt("quantity"),
+                        resultSet.getBigDecimal("unit_price"),
+                        resultSet.getBigDecimal("subtotal"),
                         resultSet.getInt("item_index")
                 ))
                 .list();
@@ -180,6 +216,8 @@ class OrderPersistenceAdapterTest {
                 () -> assertEquals(expected.id(), actual.id()),
                 () -> assertEquals(expected.customerId(), actual.customerId()),
                 () -> assertEquals(expected.paymentMethod(), actual.paymentMethod()),
+                () -> assertEquals(expected.status(), actual.status()),
+                () -> assertEquals(expected.total(), actual.total()),
                 () -> assertEquals(expected.createdAt(), actual.createdAt()),
                 () -> assertEquals(expectedVersion, actual.version()),
                 () -> assertEquals(
@@ -199,21 +237,35 @@ class OrderPersistenceAdapterTest {
                         OrderItem.create(
                                 new OrderItemId(UUID.fromString("384414fd-8b64-44df-8678-304f108f87f7")),
                                 new ProductId(UUID.fromString("6ba7b810-9dad-11d1-80b4-00c04fd430c8")),
-                                new Quantity(2)
+                                new Quantity(2),
+                                money("10.50")
                         ),
                         OrderItem.create(
                                 new OrderItemId(UUID.fromString("145df3f2-5904-4af0-adbb-4d07dbe40f0f")),
                                 new ProductId(UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8")),
-                                new Quantity(1)
+                                new Quantity(1),
+                                money("4.00")
                         )
                 )
         );
     }
 
-    private record ItemState(OrderItemId id, ProductId productId, Quantity quantity) {
+    private record ItemState(
+            OrderItemId id,
+            ProductId productId,
+            Quantity quantity,
+            Money unitPrice,
+            Money subtotal
+    ) {
 
         private static ItemState from(OrderItem item) {
-            return new ItemState(item.id(), item.productId(), item.quantity());
+            return new ItemState(
+                    item.id(),
+                    item.productId(),
+                    item.quantity(),
+                    item.unitPrice(),
+                    item.subtotal()
+            );
         }
     }
 
@@ -221,6 +273,9 @@ class OrderPersistenceAdapterTest {
             UUID id,
             UUID customerId,
             String paymentMethod,
+            String status,
+            BigDecimal totalAmount,
+            String currency,
             Instant createdAt,
             int version
     ) {
@@ -231,6 +286,8 @@ class OrderPersistenceAdapterTest {
             UUID orderId,
             UUID productId,
             int quantity,
+            BigDecimal unitPrice,
+            BigDecimal subtotal,
             int itemIndex
     ) {
 
@@ -240,8 +297,14 @@ class OrderPersistenceAdapterTest {
                     order.id().value(),
                     item.productId().value(),
                     item.quantity().value(),
+                    item.unitPrice().amount(),
+                    item.subtotal().amount(),
                     itemIndex
             );
         }
+    }
+
+    private static Money money(String amount) {
+        return new Money(new BigDecimal(amount), "BRL");
     }
 }

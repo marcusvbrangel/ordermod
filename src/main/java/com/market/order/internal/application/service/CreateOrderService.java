@@ -6,6 +6,7 @@ import com.market.order.internal.application.port.in.CreateOrderUseCase;
 import com.market.order.internal.application.port.out.OrderEventPublisher;
 import com.market.order.internal.application.port.out.OrderRepository;
 import com.market.order.internal.domain.model.CustomerId;
+import com.market.order.internal.domain.model.Money;
 import com.market.order.internal.domain.model.Order;
 import com.market.order.internal.domain.model.OrderId;
 import com.market.order.internal.domain.model.OrderItem;
@@ -48,7 +49,8 @@ public class CreateOrderService implements CreateOrderUseCase {
                         .map(item -> OrderItem.create(
                                 new OrderItemId(UUID.randomUUID()),
                                 new ProductId(item.productId()),
-                                new Quantity(item.quantity())
+                                new Quantity(item.quantity()),
+                                new Money(item.unitPrice(), command.currency())
                         ))
                         .toList()
         );
@@ -57,7 +59,20 @@ public class CreateOrderService implements CreateOrderUseCase {
 
         publishDomainEvents(order);
 
-        return new CreateOrderResult(savedOrder.id().value());
+        return new CreateOrderResult(
+                savedOrder.id().value(),
+                savedOrder.status().name(),
+                savedOrder.total().amount(),
+                savedOrder.total().currency(),
+                savedOrder.items().stream()
+                        .map(item -> new CreateOrderResult.Item(
+                                item.productId().value(),
+                                item.quantity().value(),
+                                item.unitPrice().amount(),
+                                item.subtotal().amount()
+                        ))
+                        .toList()
+        );
     }
 
     private void publishDomainEvents(Order order) {

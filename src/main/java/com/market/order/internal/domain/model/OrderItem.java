@@ -9,8 +9,16 @@ public final class OrderItem {
     private final OrderItemId id;
     private final ProductId productId;
     private final Quantity quantity;
+    private final Money unitPrice;
+    private final Money subtotal;
 
-    private OrderItem(OrderItemId id, ProductId productId, Quantity quantity) {
+    private OrderItem(
+            OrderItemId id,
+            ProductId productId,
+            Quantity quantity,
+            Money unitPrice,
+            Money subtotal
+    ) {
         if (id == null) {
             throw new OrderDomainException("orderItemId é obrigatório");
         }
@@ -23,17 +31,41 @@ public final class OrderItem {
             throw new OrderDomainException("quantity é obrigatória");
         }
 
+        if (unitPrice == null || !unitPrice.isPositive()) {
+            throw new OrderDomainException("unitPrice deve ser maior que zero");
+        }
+
+        if (subtotal == null) {
+            throw new OrderDomainException("subtotal é obrigatório");
+        }
+
+        if (!unitPrice.multiply(quantity).equals(subtotal)) {
+            throw new OrderDomainException("subtotal deve corresponder a unitPrice multiplicado por quantity");
+        }
+
         this.id = id;
         this.productId = productId;
         this.quantity = quantity;
+        this.unitPrice = unitPrice;
+        this.subtotal = subtotal;
     }
 
-    public static OrderItem create(OrderItemId id, ProductId productId, Quantity quantity) {
-        return new OrderItem(id, productId, quantity);
+    public static OrderItem create(OrderItemId id, ProductId productId, Quantity quantity, Money unitPrice) {
+        if (unitPrice == null) {
+            throw new OrderDomainException("unitPrice é obrigatório");
+        }
+
+        return new OrderItem(id, productId, quantity, unitPrice, unitPrice.multiply(quantity));
     }
 
-    public static OrderItem reconstitute(OrderItemId id, ProductId productId, Quantity quantity) {
-        return new OrderItem(id, productId, quantity);
+    public static OrderItem reconstitute(
+            OrderItemId id,
+            ProductId productId,
+            Quantity quantity,
+            Money unitPrice,
+            Money subtotal
+    ) {
+        return new OrderItem(id, productId, quantity, unitPrice, subtotal);
     }
 
     public OrderItemId id() {
@@ -46,6 +78,14 @@ public final class OrderItem {
 
     public Quantity quantity() {
         return quantity;
+    }
+
+    public Money unitPrice() {
+        return unitPrice;
+    }
+
+    public Money subtotal() {
+        return subtotal;
     }
 
     @Override

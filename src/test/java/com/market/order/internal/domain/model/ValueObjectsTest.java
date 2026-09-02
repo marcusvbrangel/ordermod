@@ -3,6 +3,7 @@ package com.market.order.internal.domain.model;
 import com.market.order.internal.domain.exception.OrderDomainException;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -78,6 +79,41 @@ class ValueObjectsTest {
         assertAll(
                 () -> assertTrue(zero.getMessage().contains("quantity")),
                 () -> assertTrue(negative.getMessage().contains("quantity"))
+        );
+    }
+
+    @Test
+    void moneyNormalizesScaleAndCurrencyAndSupportsExactArithmetic() {
+        var price = new Money(new BigDecimal("10.5"), " brl ");
+
+        assertAll(
+                () -> assertEquals(new BigDecimal("10.50"), price.amount()),
+                () -> assertEquals("BRL", price.currency()),
+                () -> assertEquals(
+                        new Money(new BigDecimal("21.00"), "BRL"),
+                        price.multiply(new Quantity(2))
+                ),
+                () -> assertEquals(
+                        new Money(new BigDecimal("14.50"), "BRL"),
+                        price.add(new Money(new BigDecimal("4.00"), "BRL"))
+                )
+        );
+    }
+
+    @Test
+    void moneyRejectsInvalidAmountCurrencyScaleAndMixedCurrencyArithmetic() {
+        var brl = new Money(new BigDecimal("1.00"), "BRL");
+
+        assertAll(
+                () -> assertThrows(OrderDomainException.class, () -> new Money(null, "BRL")),
+                () -> assertThrows(OrderDomainException.class, () -> new Money(BigDecimal.ONE, null)),
+                () -> assertThrows(OrderDomainException.class, () -> new Money(BigDecimal.ONE, "XYZ")),
+                () -> assertThrows(OrderDomainException.class, () -> new Money(new BigDecimal("-0.01"), "BRL")),
+                () -> assertThrows(OrderDomainException.class, () -> new Money(new BigDecimal("1.001"), "BRL")),
+                () -> assertThrows(OrderDomainException.class,
+                        () -> new Money(new BigDecimal("100000000000000000.00"), "BRL")),
+                () -> assertThrows(OrderDomainException.class,
+                        () -> brl.add(new Money(new BigDecimal("1.00"), "USD")))
         );
     }
 }
