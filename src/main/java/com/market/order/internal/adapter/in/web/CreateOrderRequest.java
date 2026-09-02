@@ -17,8 +17,7 @@ public record CreateOrderRequest(
         String paymentMethod,
 
         @NotEmpty(message = "items deve conter pelo menos um item")
-        @Valid
-        List<Item> items
+        List<@NotNull(message = "item é obrigatório") @Valid Item> items
 ) {
 
     public record Item(

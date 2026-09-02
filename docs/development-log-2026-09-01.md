@@ -21,9 +21,14 @@ com.market.order
 ├── package-info.java
 └── internal
     ├── domain
-    │   ├── model
+    │   ├── event
+    │   │   ├── OrderDomainEvent
+    │   │   └── OrderPlacedDomainEvent
     │   ├── exception
     │   │   └── OrderDomainException
+    │   ├── model
+    │   │   ├── Order / OrderItem
+    │   │   └── seis Value Objects
     │   └── package-info.java
     ├── application
     │   ├── port.in
@@ -57,7 +62,7 @@ O antigo `OrderService` foi substituído por `CreateOrderService`, que implement
 - `OrderRepository`, para persistir o agregado;
 - `OrderEventPublisher`, para publicar o fato de negócio.
 
-O limite transacional permanece no método do caso de uso. A sequência continua sendo persistir o pedido e, em seguida, publicar `OrderCreatedEvent` usando os dados do agregado salvo.
+O limite transacional permanece no método do caso de uso. Após a evolução de DDD tático, a sequência é criar a Aggregate Root, persistir o pedido e despachar seu Domain Event por uma porta. O adaptador de saída o traduz para `OrderCreatedEvent` e o publica.
 
 ### Domínio e persistência
 
@@ -76,9 +81,31 @@ Essa separação permite evoluir o domínio e o esquema relacional de forma inde
 
 ### Publicação de eventos
 
-`SpringOrderEventPublisher` implementa `OrderEventPublisher` e concentra a dependência de `ApplicationEventPublisher`. `CreateOrderService` conhece a porta e o contrato público `OrderCreatedEvent`, mas não conhece o mecanismo técnico de publicação.
+`SpringOrderEventPublisher` implementa `OrderEventPublisher` e concentra a dependência de `ApplicationEventPublisher`. Após a evolução de DDD, `CreateOrderService` conhece a porta e `OrderDomainEvent`, mas não conhece o contrato público `OrderCreatedEvent` nem o mecanismo técnico de publicação.
 
 Os listeners dos módulos consumidores e seus identificadores permanecem inalterados.
+
+## Evolução para DDD tático
+
+Sobre a base hexagonal, o domínio de `order` passou a demonstrar os seguintes padrões táticos:
+
+- `Order` é a Aggregate Root e controla a coleção do agregado;
+- `OrderItem` é uma Entity interna, com igualdade baseada em `OrderItemId`;
+- `OrderId`, `CustomerId`, `OrderItemId`, `ProductId`, `Quantity` e `PaymentMethod` são os seis Value Objects;
+- `Order.place(...)` representa a colocação de um pedido novo e registra `OrderPlacedDomainEvent`;
+- `Order.reconstitute(...)` recria o estado persistido e não registra evento de criação;
+- `OrderDomainEvent` e `OrderPlacedDomainEvent` permanecem internos ao domínio;
+- `OrderCreatedEvent` continua sendo o contrato público estável para `inventory` e `notification`;
+- `CreateOrderService` despacha o evento interno somente depois de a persistência retornar;
+- `SpringOrderEventPublisher` traduz o evento interno para o evento público na borda da aplicação;
+- `OrderRepository` trabalha com a Aggregate Root completa, sem repository separado para `OrderItem`;
+- `OrderPersistenceMapper` desembrulha os Value Objects na ida ao JDBC e os recompõe na reconstituição.
+
+A migration, as tabelas, o endpoint HTTP e o formato de `OrderCreatedEvent` não foram alterados por essa evolução.
+
+O estudo não adicionou Event Sourcing, CQRS, Saga, Domain Service, Specification ou repository para `OrderItem`. Também não afirma que o módulo técnico seja automaticamente um Bounded Context descoberto por DDD estratégico.
+
+O material didático correspondente foi registrado em [Tutorial de DDD tático no módulo `order`](tutorial-ddd-tatico.md).
 
 ## Fluxo após a refatoração
 
@@ -87,20 +114,23 @@ POST /api/v1/order
     → OrderController
     → CreateOrderUseCase
     → CreateOrderService
-    → Order / OrderItem
+    → Entities + seis Value Objects
+    → Order.place(...)
+    → OrderPlacedDomainEvent (interno)
     → OrderRepository (porta)
     → OrderPersistenceAdapter
+    → OrderPersistenceMapper
     → SpringDataOrderRepository
     → PostgreSQL
     → OrderEventPublisher (porta)
     → SpringOrderEventPublisher
-    → OrderCreatedEvent
+    → tradução para OrderCreatedEvent (público)
     → Inventory / Notification
 ```
 
-## Validação final
+## Baseline validada antes do DDD tático
 
-A suíte completa foi executada com Java 25:
+Antes da evolução descrita acima, a suíte da refatoração hexagonal havia sido executada com Java 25:
 
 ```text
 ./mvnw clean test
@@ -109,7 +139,7 @@ Tests run: 27, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
-A execução recompilou o projeto desde uma árvore limpa e validou os níveis abaixo.
+A execução recompilou o projeto desde uma árvore limpa e validou os níveis abaixo naquele estado anterior.
 
 ### Fronteiras arquiteturais
 
@@ -167,6 +197,19 @@ As duas publicações representam o processamento pelos listeners de `inventory`
 `CreateOrderTransactionIntegrationTest` substituiu a porta de eventos por um publicador que primeiro executa `delegate.publishEvent(event)` e depois lança uma falha simulada. Após a exceção, as contagens de `orders.orders`, `orders.order_items` e `event_publication` permaneceram iguais às contagens anteriores.
 
 Isso comprova que pedido, itens e registro durável da publicação participam da mesma transação de origem e sofrem rollback juntos.
+
+## Validação da evolução de DDD
+
+Após concluir a implementação, a suíte foi executada novamente desde uma árvore compilada do zero, com Java 25 e PostgreSQL 18.6 iniciado pelo Testcontainers:
+
+```text
+./mvnw clean test
+
+Tests run: 45, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+Além das 27 verificações da baseline hexagonal, a suíte agora cobre os seis Value Objects, identidade de `Order` e `OrderItem`, `place` contra `reconstitute`, ciclo dos Domain Events, tradução para `OrderCreatedEvent`, estado completo no mapper e no PostgreSQL e item nulo rejeitado pelo contrato HTTP.
 
 ## Pontos de atenção
 

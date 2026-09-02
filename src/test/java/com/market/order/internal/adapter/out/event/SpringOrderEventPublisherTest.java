@@ -1,6 +1,12 @@
 package com.market.order.internal.adapter.out.event;
 
 import com.market.order.OrderCreatedEvent;
+import com.market.order.internal.domain.event.OrderPlacedDomainEvent;
+import com.market.order.internal.domain.model.CustomerId;
+import com.market.order.internal.domain.model.OrderId;
+import com.market.order.internal.domain.model.PaymentMethod;
+import com.market.order.internal.domain.model.ProductId;
+import com.market.order.internal.domain.model.Quantity;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -9,25 +15,41 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class SpringOrderEventPublisherTest {
 
     @Test
-    void delegatesTheSameEventToSpringPublisher() {
+    void translatesDomainEventToThePublicIntegrationEvent() {
         var publishedObject = new AtomicReference<Object>();
         ApplicationEventPublisher springPublisher = publishedObject::set;
         var adapter = new SpringOrderEventPublisher(springPublisher);
-        var event = new OrderCreatedEvent(
-                UUID.randomUUID(),
-                Instant.parse("2026-09-01T12:00:00Z"),
-                UUID.randomUUID(),
-                "PIX",
-                List.of(new OrderCreatedEvent.Item(UUID.randomUUID(), 2))
+        var orderId = UUID.randomUUID();
+        var customerId = UUID.randomUUID();
+        var productId = UUID.randomUUID();
+        var occurredAt = Instant.parse("2026-09-01T12:00:00Z");
+        var event = new OrderPlacedDomainEvent(
+                new OrderId(orderId),
+                occurredAt,
+                new CustomerId(customerId),
+                new PaymentMethod("PIX"),
+                List.of(new OrderPlacedDomainEvent.Item(
+                        new ProductId(productId),
+                        new Quantity(2)
+                ))
         );
 
         adapter.publish(event);
 
-        assertSame(event, publishedObject.get());
+        assertEquals(
+                new OrderCreatedEvent(
+                        orderId,
+                        occurredAt,
+                        customerId,
+                        "PIX",
+                        List.of(new OrderCreatedEvent.Item(productId, 2))
+                ),
+                publishedObject.get()
+        );
     }
 }

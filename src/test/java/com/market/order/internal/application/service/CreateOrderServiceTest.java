@@ -1,10 +1,16 @@
 package com.market.order.internal.application.service;
 
-import com.market.order.OrderCreatedEvent;
 import com.market.order.internal.application.port.in.CreateOrderCommand;
 import com.market.order.internal.application.port.out.OrderEventPublisher;
 import com.market.order.internal.application.port.out.OrderRepository;
+import com.market.order.internal.domain.event.OrderDomainEvent;
+import com.market.order.internal.domain.event.OrderPlacedDomainEvent;
+import com.market.order.internal.domain.exception.OrderDomainException;
+import com.market.order.internal.domain.model.CustomerId;
 import com.market.order.internal.domain.model.Order;
+import com.market.order.internal.domain.model.PaymentMethod;
+import com.market.order.internal.domain.model.ProductId;
+import com.market.order.internal.domain.model.Quantity;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -16,6 +22,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -25,10 +33,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CreateOrderServiceTest {
 
     @Test
-    void savesOrderBeforePublishingEventAndReturnsCreatedOrderId() {
+    void savesAggregateBeforePublishingItsDomainEventAndReturnsPersistedIdentity() {
         var calls = new ArrayList<String>();
         var orderReceivedByRepository = new AtomicReference<Order>();
-        var eventReceivedByPublisher = new AtomicReference<OrderCreatedEvent>();
+        var pendingEventsAtSave = new AtomicInteger();
+        var eventReceivedByPublisher = new AtomicReference<OrderDomainEvent>();
         var customerId = UUID.randomUUID();
         var firstProductId = UUID.randomUUID();
         var secondProductId = UUID.randomUUID();
@@ -36,8 +45,9 @@ class CreateOrderServiceTest {
         OrderRepository repository = order -> {
             calls.add("save");
             orderReceivedByRepository.set(order);
+            pendingEventsAtSave.set(order.domainEvents().size());
 
-            return new Order(
+            return Order.reconstitute(
                     order.id(),
                     order.customerId(),
                     order.paymentMethod(),
@@ -53,7 +63,7 @@ class CreateOrderServiceTest {
         var service = new CreateOrderService(repository, publisher);
         var command = new CreateOrderCommand(
                 customerId,
-                "PIX",
+                "  PIX  ",
                 List.of(
                         new CreateOrderCommand.Item(firstProductId, 2),
                         new CreateOrderCommand.Item(secondProductId, 1)
@@ -62,42 +72,52 @@ class CreateOrderServiceTest {
 
         var result = service.createOrder(command);
 
-        var persistedOrder = orderReceivedByRepository.get();
-        var publishedEvent = eventReceivedByPublisher.get();
+        var aggregate = orderReceivedByRepository.get();
+        var placedEvent = assertInstanceOf(
+                OrderPlacedDomainEvent.class,
+                eventReceivedByPublisher.get()
+        );
 
         assertAll(
                 () -> assertEquals(List.of("save", "publish"), calls),
-                () -> assertNotNull(persistedOrder),
-                () -> assertNotNull(persistedOrder.id()),
-                () -> assertNotNull(persistedOrder.createdAt()),
-                () -> assertEquals(customerId, persistedOrder.customerId()),
-                () -> assertEquals("PIX", persistedOrder.paymentMethod()),
-                () -> assertNull(persistedOrder.version()),
-                () -> assertEquals(2, persistedOrder.items().size()),
-                () -> assertNotNull(persistedOrder.items().getFirst().id()),
-                () -> assertEquals(firstProductId, persistedOrder.items().getFirst().productId()),
-                () -> assertEquals(2, persistedOrder.items().getFirst().quantity()),
-                () -> assertNotNull(persistedOrder.items().getLast().id()),
-                () -> assertEquals(secondProductId, persistedOrder.items().getLast().productId()),
-                () -> assertEquals(1, persistedOrder.items().getLast().quantity()),
-                () -> assertNotNull(publishedEvent),
-                () -> assertEquals(persistedOrder.id(), publishedEvent.orderId()),
-                () -> assertEquals(persistedOrder.createdAt(), publishedEvent.createdAt()),
-                () -> assertEquals(customerId, publishedEvent.customerId()),
-                () -> assertEquals("PIX", publishedEvent.paymentMethod()),
+                () -> assertNotNull(aggregate),
+                () -> assertNotNull(aggregate.id().value()),
+                () -> assertNotNull(aggregate.createdAt()),
+                () -> assertEquals(new CustomerId(customerId), aggregate.customerId()),
+                () -> assertEquals(new PaymentMethod("PIX"), aggregate.paymentMethod()),
+                () -> assertNull(aggregate.version()),
+                () -> assertEquals(2, aggregate.items().size()),
+                () -> assertNotNull(aggregate.items().getFirst().id().value()),
+                () -> assertEquals(new ProductId(firstProductId), aggregate.items().getFirst().productId()),
+                () -> assertEquals(new Quantity(2), aggregate.items().getFirst().quantity()),
+                () -> assertNotNull(aggregate.items().getLast().id().value()),
+                () -> assertEquals(new ProductId(secondProductId), aggregate.items().getLast().productId()),
+                () -> assertEquals(new Quantity(1), aggregate.items().getLast().quantity()),
+                () -> assertEquals(1, pendingEventsAtSave.get()),
+                () -> assertTrue(aggregate.domainEvents().isEmpty()),
+                () -> assertEquals(aggregate.id(), placedEvent.orderId()),
+                () -> assertEquals(aggregate.createdAt(), placedEvent.occurredAt()),
+                () -> assertEquals(aggregate.customerId(), placedEvent.customerId()),
+                () -> assertEquals(aggregate.paymentMethod(), placedEvent.paymentMethod()),
                 () -> assertEquals(
                         List.of(
-                                new OrderCreatedEvent.Item(firstProductId, 2),
-                                new OrderCreatedEvent.Item(secondProductId, 1)
+                                new OrderPlacedDomainEvent.Item(
+                                        new ProductId(firstProductId),
+                                        new Quantity(2)
+                                ),
+                                new OrderPlacedDomainEvent.Item(
+                                        new ProductId(secondProductId),
+                                        new Quantity(1)
+                                )
                         ),
-                        publishedEvent.items()
+                        placedEvent.items()
                 ),
-                () -> assertEquals(persistedOrder.id(), result.orderId())
+                () -> assertEquals(aggregate.id().value(), result.orderId())
         );
     }
 
     @Test
-    void doesNotPublishEventWhenRepositoryFails() {
+    void doesNotPublishDomainEventWhenRepositoryFails() {
         var repositoryFailure = new IllegalStateException("database unavailable");
         var publicationCount = new AtomicInteger();
         OrderRepository repository = order -> {
@@ -118,14 +138,17 @@ class CreateOrderServiceTest {
     }
 
     @Test
-    void propagatesPublisherFailureAfterSavingOrder() {
+    void propagatesPublisherFailureAfterSavingAndKeepsEventPending() {
         var publisherFailure = new IllegalStateException("event infrastructure unavailable");
-        var orderWasSaved = new AtomicBoolean();
+        var calls = new ArrayList<String>();
+        var savedOrder = new AtomicReference<Order>();
         OrderRepository repository = order -> {
-            orderWasSaved.set(true);
+            calls.add("save");
+            savedOrder.set(order);
             return order;
         };
         OrderEventPublisher publisher = event -> {
+            calls.add("publish");
             throw publisherFailure;
         };
         var service = new CreateOrderService(repository, publisher);
@@ -136,8 +159,52 @@ class CreateOrderServiceTest {
         );
 
         assertAll(
-                () -> assertTrue(orderWasSaved.get()),
-                () -> assertSame(publisherFailure, thrown)
+                () -> assertEquals(List.of("save", "publish"), calls),
+                () -> assertSame(publisherFailure, thrown),
+                () -> assertEquals(1, savedOrder.get().domainEvents().size())
+        );
+    }
+
+    @Test
+    void rejectsInvalidDomainValueBeforeCallingOutputPorts() {
+        var repositoryWasCalled = new AtomicBoolean();
+        var publisherWasCalled = new AtomicBoolean();
+        OrderRepository repository = order -> {
+            repositoryWasCalled.set(true);
+            return order;
+        };
+        OrderEventPublisher publisher = event -> publisherWasCalled.set(true);
+        var service = new CreateOrderService(repository, publisher);
+        var command = new CreateOrderCommand(
+                UUID.randomUUID(),
+                "   ",
+                List.of(new CreateOrderCommand.Item(UUID.randomUUID(), 1))
+        );
+
+        assertThrows(OrderDomainException.class, () -> service.createOrder(command));
+
+        assertAll(
+                () -> assertFalse(repositoryWasCalled.get()),
+                () -> assertFalse(publisherWasCalled.get())
+        );
+    }
+
+    @Test
+    void rejectsNullCommandBeforeCallingOutputPorts() {
+        var repositoryWasCalled = new AtomicBoolean();
+        var publisherWasCalled = new AtomicBoolean();
+        OrderRepository repository = order -> {
+            repositoryWasCalled.set(true);
+            return order;
+        };
+        OrderEventPublisher publisher = event -> publisherWasCalled.set(true);
+        var service = new CreateOrderService(repository, publisher);
+
+        assertThrows(NullPointerException.class, () -> service.createOrder(null));
+
+        assertAll(
+                () -> assertFalse(repositoryWasCalled.get()),
+                () -> assertFalse(publisherWasCalled.get())
         );
     }
 
