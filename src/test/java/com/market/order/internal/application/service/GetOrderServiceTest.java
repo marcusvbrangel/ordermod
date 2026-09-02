@@ -99,6 +99,7 @@ class GetOrderServiceTest {
                 OrderStatus.AGUARDANDO_ESTOQUE,
                 money("25.00"),
                 Instant.parse("2026-09-02T12:00:00Z"),
+                /* cancelledAt */ null,
                 0,
                 List.of(
                         OrderItem.reconstitute(

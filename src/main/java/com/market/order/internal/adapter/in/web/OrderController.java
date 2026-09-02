@@ -7,6 +7,7 @@ import com.market.order.internal.application.port.in.GetOrderUseCase;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @RestController
 public class OrderController implements OrderHttpApi {
@@ -19,6 +20,7 @@ public class OrderController implements OrderHttpApi {
         this(createOrderUseCase, getOrderUseCase, null);
     }
 
+    @Autowired
     public OrderController(CreateOrderUseCase createOrderUseCase, GetOrderUseCase getOrderUseCase, com.market.order.internal.application.port.in.CancelOrderUseCase cancelOrderUseCase) {
         this.createOrderUseCase = createOrderUseCase;
         this.getOrderUseCase = getOrderUseCase;

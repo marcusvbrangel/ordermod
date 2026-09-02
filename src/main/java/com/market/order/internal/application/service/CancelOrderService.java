@@ -6,6 +6,7 @@ import com.market.order.internal.application.port.in.CancelOrderCommand;
 import com.market.order.internal.application.port.in.CancelOrderResult;
 import com.market.order.internal.application.port.in.CancelOrderUseCase;
 import com.market.order.internal.application.port.out.OrderRepository;
+import com.market.order.internal.application.port.out.OrderEventPublisher;
 import com.market.order.internal.domain.model.Order;
 import com.market.order.internal.domain.model.OrderId;
 import com.market.order.internal.domain.model.OrderStatus;
@@ -18,9 +19,11 @@ import java.time.Instant;
 public class CancelOrderService implements CancelOrderUseCase {
 
     private final OrderRepository orderRepository;
+    private final OrderEventPublisher eventPublisher;
 
-    public CancelOrderService(OrderRepository orderRepository) {
+    public CancelOrderService(OrderRepository orderRepository, OrderEventPublisher eventPublisher) {
         this.orderRepository = orderRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -49,6 +52,14 @@ public class CancelOrderService implements CancelOrderUseCase {
 
         var saved = orderRepository.save(cancelled);
 
+        // publish domain events recorded during cancellation
+        publishDomainEvents(cancelled);
+
         return new CancelOrderResult(saved.id().value(), saved.status().name(), Instant.now());
+    }
+
+    private void publishDomainEvents(Order order) {
+        order.domainEvents().forEach(eventPublisher::publish);
+        order.clearDomainEvents();
     }
 }

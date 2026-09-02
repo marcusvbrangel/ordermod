@@ -102,6 +102,7 @@ class OrderPersistenceAdapterTest {
                 savedOrder.status(),
                 savedOrder.total(),
                 savedOrder.createdAt(),
+                savedOrder.cancelledAt(),
                 savedOrder.version(),
                 savedOrder.items()
         );

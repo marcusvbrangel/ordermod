@@ -84,6 +84,7 @@ class OrderPersistenceMapperTest {
                 OrderStatus.AGUARDANDO_ESTOQUE,
                 money("25.00"),
                 Instant.parse("2026-09-01T12:34:56Z"),
+                /* cancelledAt */ null,
                 version,
                 orderItemsFixture()
         );
@@ -114,6 +115,7 @@ class OrderPersistenceMapperTest {
                 () -> assertEquals(expected.status(), actual.status()),
                 () -> assertEquals(expected.total(), actual.total()),
                 () -> assertEquals(expected.createdAt(), actual.createdAt()),
+                () -> assertEquals(expected.cancelledAt(), actual.cancelledAt()),
                 () -> assertEquals(expected.version(), actual.version()),
                 () -> assertEquals(
                         expected.items().stream().map(ItemState::from).toList(),

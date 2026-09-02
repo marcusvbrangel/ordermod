@@ -57,6 +57,7 @@ class CreateOrderServiceTest {
                     order.status(),
                     order.total(),
                     order.createdAt(),
+                    /* cancelledAt */ null,
                     0,
                     order.items()
             );

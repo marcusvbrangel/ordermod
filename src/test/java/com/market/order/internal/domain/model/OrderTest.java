@@ -90,6 +90,7 @@ class OrderTest {
                 OrderStatus.AGUARDANDO_CAPTURA,
                 money("6.00"),
                 CREATED_AT,
+                null,
                 7,
                 items
         );
@@ -112,6 +113,7 @@ class OrderTest {
                 OrderStatus.AGUARDANDO_ESTOQUE,
                 money("99.00"),
                 CREATED_AT,
+                null,
                 0,
                 List.of(item(1, "1.00"))
         ));
@@ -179,6 +181,7 @@ class OrderTest {
                 OrderStatus.AGUARDANDO_ESTOQUE,
                 money("1.00"),
                 CREATED_AT,
+                null,
                 -1,
                 items
         ));
@@ -208,6 +211,7 @@ class OrderTest {
                 status,
                 total,
                 CREATED_AT,
+                null,
                 version,
                 items
         );

@@ -20,6 +20,7 @@ public record OrderJdbcEntity(
         @Column("total_amount") BigDecimal totalAmount,
         @Column("currency") String currency,
         @Column("created_at") Instant createdAt,
+        @Column("cancelled_at") Instant cancelledAt,
         @Version @Column("version") Integer version,
         @MappedCollection(idColumn = "order_id", keyColumn = "item_index")
         List<OrderItemJdbcEntity> items

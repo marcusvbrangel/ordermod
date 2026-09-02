@@ -24,6 +24,7 @@ public class OrderPersistenceMapper {
                 order.total().amount(),
                 order.total().currency(),
                 order.createdAt(),
+                order.cancelledAt(),
                 order.version(),
                 order.items().stream()
                         .map(item -> new OrderItemJdbcEntity(
@@ -45,6 +46,7 @@ public class OrderPersistenceMapper {
                 OrderStatus.valueOf(entity.status()),
                 new Money(entity.totalAmount(), entity.currency()),
                 entity.createdAt(),
+                entity.cancelledAt(),
                 entity.version(),
                 entity.items().stream()
                         .map(item -> OrderItem.reconstitute(

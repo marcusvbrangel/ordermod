@@ -17,6 +17,7 @@ public final class Order {
     private final OrderStatus status;
     private final Money total;
     private final Instant createdAt;
+    private final Instant cancelledAt;
     private final Integer version;
     private final List<OrderItem> items;
     private final List<OrderDomainEvent> domainEvents = new ArrayList<>();
@@ -28,6 +29,7 @@ public final class Order {
             OrderStatus status,
             Money total,
             Instant createdAt,
+            Instant cancelledAt,
             Integer version,
             List<OrderItem> items
     ) {
@@ -55,6 +57,10 @@ public final class Order {
             throw new OrderDomainException("createdAt é obrigatório");
         }
 
+        if (cancelledAt != null && status != OrderStatus.CANCELADO) {
+            throw new OrderDomainException("cancelledAt só pode existir quando status = CANCELADO");
+        }
+
         if (items == null || items.isEmpty()) {
             throw new OrderDomainException("items deve conter pelo menos um item");
         }
@@ -78,6 +84,7 @@ public final class Order {
         this.status = status;
         this.total = total;
         this.createdAt = createdAt;
+        this.cancelledAt = cancelledAt;
         this.version = version;
         this.items = List.copyOf(items);
     }
@@ -97,7 +104,8 @@ public final class Order {
                 OrderStatus.AGUARDANDO_ESTOQUE,
                 total,
                 createdAt,
-                null,
+                /* cancelledAt */ null,
+                /* version */ null,
                 items
         );
 
@@ -128,10 +136,11 @@ public final class Order {
             OrderStatus status,
             Money total,
             Instant createdAt,
+            Instant cancelledAt,
             Integer version,
             List<OrderItem> items
     ) {
-        return new Order(id, customerId, paymentMethod, status, total, createdAt, version, items);
+        return new Order(id, customerId, paymentMethod, status, total, createdAt, cancelledAt, version, items);
     }
 
     /**
@@ -143,16 +152,28 @@ public final class Order {
             return this;
         }
 
-        return Order.reconstitute(
+        var cancelledAt = Instant.now();
+        var cancelled = Order.reconstitute(
                 this.id,
                 this.customerId,
                 this.paymentMethod,
                 OrderStatus.CANCELADO,
                 this.total,
                 this.createdAt,
+                cancelledAt,
                 this.version,
                 this.items
         );
+
+        // record a domain event for cancellation
+        cancelled.record(new com.market.order.internal.domain.event.OrderCanceledDomainEvent(
+                cancelled.id,
+                cancelledAt,
+                cancelled.customerId,
+                cancelledAt
+        ));
+
+        return cancelled;
     }
 
     public OrderId id() {
@@ -177,6 +198,10 @@ public final class Order {
 
     public Instant createdAt() {
         return createdAt;
+    }
+
+    public Instant cancelledAt() {
+        return cancelledAt;
     }
 
     public Integer version() {
