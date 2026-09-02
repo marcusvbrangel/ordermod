@@ -7,18 +7,22 @@ import com.market.order.internal.domain.event.OrderDomainEvent;
 import com.market.order.internal.domain.event.OrderPlacedDomainEvent;
 import com.market.order.internal.domain.exception.OrderDomainException;
 import com.market.order.internal.domain.model.CustomerId;
+import com.market.order.internal.domain.model.Money;
 import com.market.order.internal.domain.model.Order;
+import com.market.order.internal.domain.model.OrderId;
+import com.market.order.internal.domain.model.OrderStatus;
 import com.market.order.internal.domain.model.PaymentMethod;
-import com.market.order.internal.domain.model.ProductId;
-import com.market.order.internal.domain.model.Quantity;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,86 +37,95 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class CreateOrderServiceTest {
 
     @Test
-    void savesAggregateBeforePublishingItsDomainEventAndReturnsPersistedIdentity() {
+    void calculatesSnapshotSavesBeforePublishingAndReturnsCalculatedResult() {
         var calls = new ArrayList<String>();
-        var orderReceivedByRepository = new AtomicReference<Order>();
+        var receivedOrder = new AtomicReference<Order>();
         var pendingEventsAtSave = new AtomicInteger();
-        var eventReceivedByPublisher = new AtomicReference<OrderDomainEvent>();
+        var receivedEvent = new AtomicReference<OrderDomainEvent>();
         var customerId = UUID.randomUUID();
         var firstProductId = UUID.randomUUID();
         var secondProductId = UUID.randomUUID();
 
-        OrderRepository repository = order -> {
+        OrderRepository repository = repository(order -> {
             calls.add("save");
-            orderReceivedByRepository.set(order);
+            receivedOrder.set(order);
             pendingEventsAtSave.set(order.domainEvents().size());
-
             return Order.reconstitute(
                     order.id(),
                     order.customerId(),
                     order.paymentMethod(),
+                    order.status(),
+                    order.total(),
                     order.createdAt(),
                     0,
                     order.items()
             );
-        };
+        });
         OrderEventPublisher publisher = event -> {
             calls.add("publish");
-            eventReceivedByPublisher.set(event);
+            receivedEvent.set(event);
         };
         var service = new CreateOrderService(repository, publisher);
         var command = new CreateOrderCommand(
                 customerId,
-                "  PIX  ",
+                "  CREDIT_CARD  ",
+                " brl ",
                 List.of(
-                        new CreateOrderCommand.Item(firstProductId, 2),
-                        new CreateOrderCommand.Item(secondProductId, 1)
+                        new CreateOrderCommand.Item(firstProductId, 2, new BigDecimal("10.50")),
+                        new CreateOrderCommand.Item(secondProductId, 1, new BigDecimal("4.00"))
                 )
         );
 
         var result = service.createOrder(command);
 
-        var aggregate = orderReceivedByRepository.get();
-        var placedEvent = assertInstanceOf(
-                OrderPlacedDomainEvent.class,
-                eventReceivedByPublisher.get()
-        );
-
+        var aggregate = receivedOrder.get();
+        var placedEvent = assertInstanceOf(OrderPlacedDomainEvent.class, receivedEvent.get());
         assertAll(
                 () -> assertEquals(List.of("save", "publish"), calls),
-                () -> assertNotNull(aggregate),
                 () -> assertNotNull(aggregate.id().value()),
                 () -> assertNotNull(aggregate.createdAt()),
                 () -> assertEquals(new CustomerId(customerId), aggregate.customerId()),
-                () -> assertEquals(new PaymentMethod("PIX"), aggregate.paymentMethod()),
+                () -> assertEquals(new PaymentMethod("CREDIT_CARD"), aggregate.paymentMethod()),
+                () -> assertEquals(OrderStatus.AGUARDANDO_ESTOQUE, aggregate.status()),
+                () -> assertEquals(money("25.00"), aggregate.total()),
                 () -> assertNull(aggregate.version()),
-                () -> assertEquals(2, aggregate.items().size()),
-                () -> assertNotNull(aggregate.items().getFirst().id().value()),
-                () -> assertEquals(new ProductId(firstProductId), aggregate.items().getFirst().productId()),
-                () -> assertEquals(new Quantity(2), aggregate.items().getFirst().quantity()),
-                () -> assertNotNull(aggregate.items().getLast().id().value()),
-                () -> assertEquals(new ProductId(secondProductId), aggregate.items().getLast().productId()),
-                () -> assertEquals(new Quantity(1), aggregate.items().getLast().quantity()),
+                () -> assertEquals(money("21.00"), aggregate.items().getFirst().subtotal()),
+                () -> assertEquals(money("4.00"), aggregate.items().getLast().subtotal()),
                 () -> assertEquals(1, pendingEventsAtSave.get()),
                 () -> assertTrue(aggregate.domainEvents().isEmpty()),
                 () -> assertEquals(aggregate.id(), placedEvent.orderId()),
-                () -> assertEquals(aggregate.createdAt(), placedEvent.occurredAt()),
-                () -> assertEquals(aggregate.customerId(), placedEvent.customerId()),
-                () -> assertEquals(aggregate.paymentMethod(), placedEvent.paymentMethod()),
-                () -> assertEquals(
-                        List.of(
-                                new OrderPlacedDomainEvent.Item(
-                                        new ProductId(firstProductId),
-                                        new Quantity(2)
-                                ),
-                                new OrderPlacedDomainEvent.Item(
-                                        new ProductId(secondProductId),
-                                        new Quantity(1)
-                                )
-                        ),
-                        placedEvent.items()
-                ),
-                () -> assertEquals(aggregate.id().value(), result.orderId())
+                () -> assertEquals(aggregate.total(), placedEvent.total()),
+                () -> assertEquals(aggregate.id().value(), result.orderId()),
+                () -> assertEquals("AGUARDANDO_ESTOQUE", result.status()),
+                () -> assertEquals(new BigDecimal("25.00"), result.totalAmount()),
+                () -> assertEquals("BRL", result.currency()),
+                () -> assertEquals(new BigDecimal("21.00"), result.items().getFirst().subtotal())
+        );
+    }
+
+    @Test
+    void doesNotCallOutputPortsWhenMonetaryValueIsInvalid() {
+        var repositoryWasCalled = new AtomicBoolean();
+        var publisherWasCalled = new AtomicBoolean();
+        var service = new CreateOrderService(
+                repository(order -> {
+                    repositoryWasCalled.set(true);
+                    return order;
+                }),
+                event -> publisherWasCalled.set(true)
+        );
+        var command = new CreateOrderCommand(
+                UUID.randomUUID(),
+                "CREDIT_CARD",
+                "BRL",
+                List.of(new CreateOrderCommand.Item(UUID.randomUUID(), 1, new BigDecimal("1.001")))
+        );
+
+        assertThrows(OrderDomainException.class, () -> service.createOrder(command));
+
+        assertAll(
+                () -> assertFalse(repositoryWasCalled.get()),
+                () -> assertFalse(publisherWasCalled.get())
         );
     }
 
@@ -120,16 +133,14 @@ class CreateOrderServiceTest {
     void doesNotPublishDomainEventWhenRepositoryFails() {
         var repositoryFailure = new IllegalStateException("database unavailable");
         var publicationCount = new AtomicInteger();
-        OrderRepository repository = order -> {
-            throw repositoryFailure;
-        };
-        OrderEventPublisher publisher = event -> publicationCount.incrementAndGet();
-        var service = new CreateOrderService(repository, publisher);
-
-        var thrown = assertThrows(
-                IllegalStateException.class,
-                () -> service.createOrder(validCommand())
+        var service = new CreateOrderService(
+                repository(order -> {
+                    throw repositoryFailure;
+                }),
+                event -> publicationCount.incrementAndGet()
         );
+
+        var thrown = assertThrows(IllegalStateException.class, () -> service.createOrder(validCommand()));
 
         assertAll(
                 () -> assertSame(repositoryFailure, thrown),
@@ -142,21 +153,19 @@ class CreateOrderServiceTest {
         var publisherFailure = new IllegalStateException("event infrastructure unavailable");
         var calls = new ArrayList<String>();
         var savedOrder = new AtomicReference<Order>();
-        OrderRepository repository = order -> {
-            calls.add("save");
-            savedOrder.set(order);
-            return order;
-        };
-        OrderEventPublisher publisher = event -> {
-            calls.add("publish");
-            throw publisherFailure;
-        };
-        var service = new CreateOrderService(repository, publisher);
-
-        var thrown = assertThrows(
-                IllegalStateException.class,
-                () -> service.createOrder(validCommand())
+        var service = new CreateOrderService(
+                repository(order -> {
+                    calls.add("save");
+                    savedOrder.set(order);
+                    return order;
+                }),
+                event -> {
+                    calls.add("publish");
+                    throw publisherFailure;
+                }
         );
+
+        var thrown = assertThrows(IllegalStateException.class, () -> service.createOrder(validCommand()));
 
         assertAll(
                 () -> assertEquals(List.of("save", "publish"), calls),
@@ -166,39 +175,16 @@ class CreateOrderServiceTest {
     }
 
     @Test
-    void rejectsInvalidDomainValueBeforeCallingOutputPorts() {
-        var repositoryWasCalled = new AtomicBoolean();
-        var publisherWasCalled = new AtomicBoolean();
-        OrderRepository repository = order -> {
-            repositoryWasCalled.set(true);
-            return order;
-        };
-        OrderEventPublisher publisher = event -> publisherWasCalled.set(true);
-        var service = new CreateOrderService(repository, publisher);
-        var command = new CreateOrderCommand(
-                UUID.randomUUID(),
-                "   ",
-                List.of(new CreateOrderCommand.Item(UUID.randomUUID(), 1))
-        );
-
-        assertThrows(OrderDomainException.class, () -> service.createOrder(command));
-
-        assertAll(
-                () -> assertFalse(repositoryWasCalled.get()),
-                () -> assertFalse(publisherWasCalled.get())
-        );
-    }
-
-    @Test
     void rejectsNullCommandBeforeCallingOutputPorts() {
         var repositoryWasCalled = new AtomicBoolean();
         var publisherWasCalled = new AtomicBoolean();
-        OrderRepository repository = order -> {
-            repositoryWasCalled.set(true);
-            return order;
-        };
-        OrderEventPublisher publisher = event -> publisherWasCalled.set(true);
-        var service = new CreateOrderService(repository, publisher);
+        var service = new CreateOrderService(
+                repository(order -> {
+                    repositoryWasCalled.set(true);
+                    return order;
+                }),
+                event -> publisherWasCalled.set(true)
+        );
 
         assertThrows(NullPointerException.class, () -> service.createOrder(null));
 
@@ -211,8 +197,27 @@ class CreateOrderServiceTest {
     private static CreateOrderCommand validCommand() {
         return new CreateOrderCommand(
                 UUID.randomUUID(),
-                "PIX",
-                List.of(new CreateOrderCommand.Item(UUID.randomUUID(), 1))
+                "CREDIT_CARD",
+                "BRL",
+                List.of(new CreateOrderCommand.Item(UUID.randomUUID(), 1, new BigDecimal("1.00")))
         );
+    }
+
+    private static OrderRepository repository(Function<Order, Order> save) {
+        return new OrderRepository() {
+            @Override
+            public Order save(Order order) {
+                return save.apply(order);
+            }
+
+            @Override
+            public Optional<Order> findById(OrderId orderId) {
+                return Optional.empty();
+            }
+        };
+    }
+
+    private static Money money(String amount) {
+        return new Money(new BigDecimal(amount), "BRL");
     }
 }

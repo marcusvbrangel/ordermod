@@ -1,15 +1,18 @@
 package com.market.order.internal.adapter.out.persistence.jdbc;
 
 import com.market.order.internal.domain.model.CustomerId;
+import com.market.order.internal.domain.model.Money;
 import com.market.order.internal.domain.model.Order;
 import com.market.order.internal.domain.model.OrderId;
 import com.market.order.internal.domain.model.OrderItem;
 import com.market.order.internal.domain.model.OrderItemId;
+import com.market.order.internal.domain.model.OrderStatus;
 import com.market.order.internal.domain.model.PaymentMethod;
 import com.market.order.internal.domain.model.ProductId;
 import com.market.order.internal.domain.model.Quantity;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -34,12 +37,17 @@ class OrderPersistenceMapperTest {
                 () -> assertEquals(order.id().value(), entity.id()),
                 () -> assertEquals(order.customerId().value(), entity.customerId()),
                 () -> assertEquals(order.paymentMethod().value(), entity.paymentMethod()),
+                () -> assertEquals(order.status().name(), entity.status()),
+                () -> assertEquals(order.total().amount(), entity.totalAmount()),
+                () -> assertEquals(order.total().currency(), entity.currency()),
                 () -> assertEquals(order.createdAt(), entity.createdAt()),
                 () -> assertEquals(order.version(), entity.version()),
                 () -> assertEquals(2, entity.items().size()),
                 () -> assertEquals(order.items().getFirst().id().value(), entity.items().getFirst().id()),
                 () -> assertEquals(order.items().getFirst().productId().value(), entity.items().getFirst().productId()),
                 () -> assertEquals(order.items().getFirst().quantity().value(), entity.items().getFirst().quantity()),
+                () -> assertEquals(order.items().getFirst().unitPrice().amount(), entity.items().getFirst().unitPrice()),
+                () -> assertEquals(order.items().getFirst().subtotal().amount(), entity.items().getFirst().subtotal()),
                 () -> assertEquals(order.items().getLast().id().value(), entity.items().getLast().id()),
                 () -> assertEquals(order.items().getLast().productId().value(), entity.items().getLast().productId()),
                 () -> assertEquals(order.items().getLast().quantity().value(), entity.items().getLast().quantity()),
@@ -73,6 +81,8 @@ class OrderPersistenceMapperTest {
                 new OrderId(UUID.fromString("20c85288-508a-4c2e-a4ae-d61b5ae3d36c")),
                 new CustomerId(UUID.fromString("550e8400-e29b-41d4-a716-446655440000")),
                 new PaymentMethod("PIX"),
+                OrderStatus.AGUARDANDO_ESTOQUE,
+                money("25.00"),
                 Instant.parse("2026-09-01T12:34:56Z"),
                 version,
                 orderItemsFixture()
@@ -84,12 +94,14 @@ class OrderPersistenceMapperTest {
                 OrderItem.create(
                         new OrderItemId(UUID.fromString("384414fd-8b64-44df-8678-304f108f87f7")),
                         new ProductId(UUID.fromString("6ba7b810-9dad-11d1-80b4-00c04fd430c8")),
-                        new Quantity(2)
+                        new Quantity(2),
+                        money("10.50")
                 ),
                 OrderItem.create(
                         new OrderItemId(UUID.fromString("145df3f2-5904-4af0-adbb-4d07dbe40f0f")),
                         new ProductId(UUID.fromString("6ba7b811-9dad-11d1-80b4-00c04fd430c8")),
-                        new Quantity(1)
+                        new Quantity(1),
+                        money("4.00")
                 )
         );
     }
@@ -99,6 +111,8 @@ class OrderPersistenceMapperTest {
                 () -> assertEquals(expected.id(), actual.id()),
                 () -> assertEquals(expected.customerId(), actual.customerId()),
                 () -> assertEquals(expected.paymentMethod(), actual.paymentMethod()),
+                () -> assertEquals(expected.status(), actual.status()),
+                () -> assertEquals(expected.total(), actual.total()),
                 () -> assertEquals(expected.createdAt(), actual.createdAt()),
                 () -> assertEquals(expected.version(), actual.version()),
                 () -> assertEquals(
@@ -108,10 +122,26 @@ class OrderPersistenceMapperTest {
         );
     }
 
-    private record ItemState(OrderItemId id, ProductId productId, Quantity quantity) {
+    private record ItemState(
+            OrderItemId id,
+            ProductId productId,
+            Quantity quantity,
+            Money unitPrice,
+            Money subtotal
+    ) {
 
         private static ItemState from(OrderItem item) {
-            return new ItemState(item.id(), item.productId(), item.quantity());
+            return new ItemState(
+                    item.id(),
+                    item.productId(),
+                    item.quantity(),
+                    item.unitPrice(),
+                    item.subtotal()
+            );
         }
+    }
+
+    private static Money money(String amount) {
+        return new Money(new BigDecimal(amount), "BRL");
     }
 }

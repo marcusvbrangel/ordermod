@@ -105,20 +105,19 @@ Uma compra atravessa módulos diferentes e pode levar algum tempo. Por isso, o p
 
 Hoje, o fluxo lógico efetivamente existente é o seguinte:
 
-1. O cliente envia sua identificação, a forma de pagamento e os produtos com suas quantidades.
-2. `Order` valida os dados básicos.
-3. `Order` cria e registra o pedido e seus itens.
+1. O cliente envia sua identificação, a forma de pagamento, a moeda e os produtos com quantidades e preços unitários declarados.
+2. `Order` valida os dados básicos e monetários.
+3. `OrderItem` calcula os subtotais e `Order` calcula o total, cria e registra o pedido como `AGUARDANDO_ESTOQUE`.
 4. `Order` anuncia o evento **Pedido criado**.
 5. `Inventory` recebe esse evento, confere se os dados necessários estão presentes e registra uma mensagem dizendo que reservará os itens.
 6. `Notification` recebe o mesmo evento e registra uma mensagem que representa uma intenção de notificação.
 7. `Payment` não participa do processo porque ainda não possui comportamento.
-8. O cliente recebe a mensagem “Pedido recebido com sucesso”.
+8. O cliente recebe uma resposta JSON com o identificador, o estado e a fotografia comercial calculada.
 
-Essa mensagem significa apenas que a solicitação foi aceita e registrada. Ela não comprova que:
+Essa resposta significa apenas que a solicitação foi aceita e registrada. Ela não comprova que:
 
 - havia estoque disponível;
 - os itens foram realmente reservados;
-- o valor da compra foi calculado;
 - o pagamento foi realizado;
 - o cliente recebeu uma notificação real;
 - o pedido foi confirmado.
@@ -128,7 +127,7 @@ Essa mensagem significa apenas que a solicitação foi aceita e registrada. Ela 
 ```text
 Cliente
    ↓
-Order registra o pedido
+Order calcula e registra o pedido como aguardando estoque
    ↓
 Pedido criado
    ├──→ Inventory valida os itens e apenas registra a intenção de reserva
@@ -147,6 +146,8 @@ O sistema atual demonstra corretamente a criação do pedido e a comunicação i
 `Inventory` não informa se conseguiu ou não reservar. `Payment` não cobra. Como esses resultados não existem, `Order` não tem elementos suficientes para decidir entre confirmação e cancelamento.
 
 O campo atual de forma de pagamento aceita um texto genérico. A restrição para cartão de crédito à vista e a relação com uma operação da Stripe pertencem ao fluxo recomendado e ainda não existem no comportamento atual.
+
+Como ainda não existe `Catalog/Pricing`, o preço unitário entra provisoriamente pela API e é considerado declarado pelo cliente apenas para fins de estudo. Subtotais e total nunca entram prontos: são calculados pelo domínio. Em uma evolução futura, somente a origem do preço deve mudar para uma fonte confiável.
 
 # 2. Responsabilidade lógica de cada módulo
 
@@ -232,11 +233,16 @@ Suas responsabilidades de negócio são:
 | `orderId` | Identificador único do pedido |
 | `customerId` | Identificador do cliente que realizou o pedido |
 | `paymentMethod` | Forma de pagamento escolhida |
+| `status` | Etapa atual; novos pedidos iniciam em `AGUARDANDO_ESTOQUE` |
+| `totalAmount` | Soma dos subtotais calculada pelo pedido |
+| `currency` | Moeda única da fotografia comercial |
 | `createdAt` | Momento em que o pedido foi criado |
 | `items` | Relação de itens solicitados |
 | `itemId` | Identificador do item dentro do pedido |
 | `productId` | Produto relacionado ao item |
 | `quantity` | Quantidade solicitada daquele produto |
+| `unitPrice` | Preço unitário declarado nesta etapa de estudo e congelado no item |
+| `itemSubtotal` | Quantidade multiplicada pelo preço unitário, calculada pelo domínio |
 | controle de versão | Controle interno das alterações do pedido, sem significado direto para o cliente |
 
 ### Informações importantes que ainda não existem
@@ -245,13 +251,8 @@ Para uma operação comercial completa, `Order` deveria preservar também:
 
 | Atributo recomendado | Finalidade |
 | --- | --- |
-| `status` | Indicar a etapa atual do pedido |
-| `unitPrice` | Registrar o preço acordado de cada unidade no momento da compra |
-| `itemSubtotal` | Registrar quantidade multiplicada pelo preço unitário |
 | `discountAmount` | Registrar descontos aplicados, quando existirem |
 | `shippingAmount` | Registrar frete, quando aplicável |
-| `totalAmount` | Informar o valor final confiável que poderá ser cobrado |
-| `currency` | Indicar a moeda do valor, por exemplo BRL |
 | `inventoryReservationId` | Relacionar o pedido à reserva de estoque |
 | `paymentId` | Relacionar o pedido à operação financeira |
 | `paymentProvider` | Registrar que a operação financeira usa a Stripe |
@@ -263,13 +264,12 @@ Para uma operação comercial completa, `Order` deveria preservar também:
 | `cancellationReason` | Explicar por que o pedido foi cancelado |
 | dados de entrega | Endereço e modalidade de entrega, caso o negócio venda produtos físicos |
 
-O valor cobrado nunca deveria ser simplesmente aceito a partir de um valor informado livremente pelo comprador. `Order` precisa preservar um total formado a partir de preços e regras comerciais confiáveis.
+O total não é aceito a partir de um valor informado livremente pelo comprador: `Order` o calcula. Nesta etapa de estudo, o preço unitário ainda é declarado na API; em produção, ele deverá vir de uma fonte comercial confiável sem alterar as regras de cálculo do domínio.
 
 ### Estados recomendados para Order
 
 | Estado | Significado |
 | --- | --- |
-| `CRIADO` | Pedido validado e registrado |
 | `AGUARDANDO_ESTOQUE` | Pedido esperando o resultado da reserva |
 | `AGUARDANDO_AUTORIZACAO` | Estoque reservado; valor do cartão ainda precisa ser autorizado |
 | `AGUARDANDO_BAIXA_ESTOQUE` | Stripe autorizou o valor; pedido espera a baixa definitiva dos itens |
@@ -294,9 +294,11 @@ O evento compartilhado atual contém:
 - momento da criação;
 - identificador do cliente;
 - forma de pagamento;
-- lista de produtos e quantidades.
+- estado inicial;
+- moeda e total calculado;
+- lista de produtos, quantidades, preços unitários e subtotais.
 
-Ele ainda não contém preço unitário, valor total, moeda, prazo de reserva ou endereço do cliente.
+Ele ainda não contém prazo de reserva ou endereço do cliente.
 
 ### Eventos recomendados para Order
 
@@ -1108,10 +1110,10 @@ Se o resultado da captura ainda for desconhecido, essas compensações aguardam 
 
 | Capacidade | Situação atual | Necessário para o processo completo |
 | --- | --- | --- |
-| Criação do pedido | Existe | Preservar também valores e estado |
-| Itens do pedido | Produto e quantidade | Incluir fotografia de preço e subtotal |
-| Estado do pedido | Não existe | Criado, aguardando, confirmado, cancelado e expirado |
-| Evento de criação | Existe | Enriquecer com dados comerciais necessários |
+| Criação do pedido | Existe com valores calculados e estado inicial | Obter o preço de uma fonte comercial confiável |
+| Itens do pedido | Produto, quantidade, preço unitário e subtotal | Adicionar descontos e demais regras comerciais quando aplicáveis |
+| Estado do pedido | Inicia em `AGUARDANDO_ESTOQUE` | Implementar as transições até confirmação, cancelamento ou expiração |
+| Evento de criação | Existe com fotografia comercial e estado | Acrescentar correlação e prazos quando os próximos módulos existirem |
 | Reserva de estoque | Apenas intenção registrada | Criar reserva real, prazo, resultado e liberação |
 | Resultado do estoque | Não existe | Eventos de reservado, recusado, baixado, reintegrado, liberado e expirado |
 | Integração com a Stripe | Não existe | Relacionar uma operação Stripe a cada pedido |
@@ -1126,7 +1128,7 @@ Se o resultado da captura ainda for desconhecido, essas compensações aguardam 
 
 Uma evolução coerente pode seguir esta sequência de negócio:
 
-1. adicionar valor dos itens, total, moeda e estado ao pedido;
+1. **Concluído — ORDER-01:** adicionar valor dos itens, total, moeda e estado ao pedido;
 2. criar uma reserva real em `Inventory`;
 3. fazer `Inventory` informar reserva aceita, recusada, liberada e expirada;
 4. fazer `Order` reagir ao resultado do estoque;

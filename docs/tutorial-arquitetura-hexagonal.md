@@ -337,7 +337,7 @@ O adaptador de entrada traduz o protocolo externo para a linguagem da aplicaçã
 ```text
 POST /api/v1/order
 Content-Type: application/json
-Resposta: 201 Created, text/plain
+Resposta: 201 Created, application/json
 ```
 
 ### 9.2 Request e validação
@@ -346,9 +346,11 @@ Resposta: 201 Created, text/plain
 
 - `customerId` obrigatório;
 - `paymentMethod` não vazio;
+- `currency` obrigatória;
 - pelo menos um item;
 - `productId` obrigatório;
-- `quantity` positiva.
+- `quantity` positiva;
+- `unitPrice` positivo, com até duas casas decimais.
 
 Essas validações protegem a fronteira HTTP. As invariantes do domínio continuam necessárias porque o domínio também pode ser criado por outras entradas.
 
@@ -417,7 +419,7 @@ OrderItemJdbcEntity → OrderItem
 
 O mapper é o custo explícito de manter o domínio independente da persistência. Esse custo evita que o modelo de negócio fique acoplado às anotações e decisões relacionais.
 
-Na ida, o mapper extrai os valores de `OrderId`, `CustomerId`, `PaymentMethod`, `OrderItemId`, `ProductId` e `Quantity`. Na volta, recria esses seis Value Objects e chama `Order.reconstitute(...)` e `OrderItem.reconstitute(...)`, evitando a geração de eventos de criação durante a hidratação.
+Na ida, o mapper extrai identificadores, quantidade, `PaymentMethod`, `Money`, estado, subtotais e total. Na volta, recompõe os Value Objects e chama `Order.reconstitute(...)` e `OrderItem.reconstitute(...)`, evitando a geração de eventos de criação durante a hidratação.
 
 ### 10.4 Implementação da porta
 
@@ -525,7 +527,7 @@ sequenceDiagram
     Port->>App: implementação injetada pelo Spring
     App->>App: comando → Entities e Value Objects
     App->>Domain: Order.place(...)
-    Domain->>Domain: valida e registra OrderPlacedDomainEvent
+    Domain->>Domain: calcula valores, define estado e registra OrderPlacedDomainEvent
     App->>RepoPort: save(order)
     RepoPort->>Jdbc: implementação injetada pelo Spring
     Jdbc->>Jdbc: domínio → entidades JDBC
@@ -538,7 +540,7 @@ sequenceDiagram
     Events->>Events: Domain Event → OrderCreatedEvent
     Events-->>Consumers: evento público pelo Spring
     App-->>Http: CreateOrderResult
-    Http-->>Client: 201 Pedido recebido com sucesso
+    Http-->>Client: 201 fotografia comercial em JSON
 ```
 
 Em termos de modelos, as conversões são:
@@ -551,7 +553,7 @@ CreateOrderRequest             adapter.in.web
 CreateOrderCommand             application.port.in
   ↓
 Order + OrderItem +            domain.model
-seis Value Objects
+Value Objects, incluindo Money
   ↓
 OrderJdbcEntity + itens        adapter.out.persistence.jdbc
   ↓
@@ -698,7 +700,7 @@ No projeto `OrdermodApplication`, a arquitetura funciona da seguinte forma:
 - a porta de entrada descreve o caso de uso;
 - o serviço de aplicação coordena domínio, persistência e evento;
 - `Order` protege o agregado e registra `OrderPlacedDomainEvent` sem depender de Spring Data;
-- seis Value Objects tornam valores e invariantes explícitos;
+- os Value Objects, incluindo `Money`, tornam valores e invariantes explícitos;
 - as portas de saída descrevem necessidades externas;
 - os adaptadores JDBC e de eventos implementam essas necessidades;
 - o adaptador de eventos traduz o Domain Event interno em `OrderCreatedEvent`, contrato público entre módulos;

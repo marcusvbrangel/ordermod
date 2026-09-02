@@ -27,10 +27,15 @@ public class SpringOrderEventPublisher implements OrderEventPublisher {
                 placedEvent.occurredAt(),
                 placedEvent.customerId().value(),
                 placedEvent.paymentMethod().value(),
+                placedEvent.status().name(),
+                placedEvent.total().amount(),
+                placedEvent.total().currency(),
                 placedEvent.items().stream()
                         .map(item -> new OrderCreatedEvent.Item(
                                 item.productId().value(),
-                                item.quantity().value()
+                                item.quantity().value(),
+                                item.unitPrice().amount(),
+                                item.subtotal().amount()
                         ))
                         .toList()
         ));

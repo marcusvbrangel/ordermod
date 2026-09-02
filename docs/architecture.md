@@ -181,6 +181,7 @@ sequenceDiagram
     InPort->>Service: executa caso de uso
     Service->>Service: comando → Value Objects e OrderItem
     Service->>Aggregate: Order.place(...)
+    Aggregate->>Aggregate: calcula subtotais e total, define AGUARDANDO_ESTOQUE
     Aggregate->>Aggregate: valida e registra OrderPlacedDomainEvent
     Service->>Repository: save(order)
     Repository->>Jdbc: implementação injetada
@@ -193,11 +194,11 @@ sequenceDiagram
     EventPort->>Events: implementação injetada
     Events->>Events: Domain Event → OrderCreatedEvent
     Events->>Listener: evento público pelo Spring Modulith
-    Service-->>Controller: CreateOrderResult(orderId)
-    Controller-->>Client: 201 Pedido recebido com sucesso
+    Service-->>Controller: CreateOrderResult com fotografia comercial
+    Controller-->>Client: 201 JSON com valores calculados e status
 ```
 
-O controller recebe um `CreateOrderResult`, mas o contrato HTTP atual preserva a resposta textual e ainda não expõe o `orderId`.
+O preço unitário e a moeda entram provisoriamente pela API enquanto o projeto não possui `Catalog/Pricing`. `OrderItem` calcula o subtotal e `Order`, como Aggregate Root, calcula o total e determina o estado inicial. Subtotais, total e status não são aceitos como fontes de verdade na requisição.
 
 ### Modelos em cada fronteira
 
@@ -206,7 +207,7 @@ CreateOrderRequest                  contrato HTTP
         ↓ OrderController
 CreateOrderCommand                  entrada do caso de uso
         ↓ CreateOrderService
-Order + OrderItem + seis Value Objects
+Order + OrderItem + Money + demais Value Objects
         ↓ Order.place(...)
 OrderPlacedDomainEvent              fato interno do domínio
 
@@ -233,32 +234,56 @@ O contrato HTTP fica em `adapter.in.web.OrderHttpApi`. O `OrderController` imple
 
 | Método | Caminho | Consome | Produz | Resposta de sucesso |
 | --- | --- | --- | --- | --- |
-| POST | `/api/v1/order` | `application/json` | `text/plain` | `201 Created` |
+| POST | `/api/v1/order` | `application/json` | `application/json` | `201 Created` |
 
 Exemplo de requisição:
 
 ```json
 {
   "customerId": "550e8400-e29b-41d4-a716-446655440000",
-  "paymentMethod": "PIX",
+  "paymentMethod": "CREDIT_CARD",
+  "currency": "BRL",
   "items": [
     {
       "productId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
-      "quantity": 2
+      "quantity": 2,
+      "unitPrice": 10.50
     },
     {
       "productId": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
-      "quantity": 1
+      "quantity": 1,
+      "unitPrice": 4.00
     }
   ]
 }
 ```
 
-Resposta atual:
+Resposta:
 
-```text
-Pedido recebido com sucesso
+```json
+{
+  "orderId": "fb116546-49d5-4946-86e2-a18327817eb9",
+  "status": "AGUARDANDO_ESTOQUE",
+  "totalAmount": 25.00,
+  "currency": "BRL",
+  "items": [
+    {
+      "productId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "quantity": 2,
+      "unitPrice": 10.50,
+      "subtotal": 21.00
+    },
+    {
+      "productId": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+      "quantity": 1,
+      "unitPrice": 4.00,
+      "subtotal": 4.00
+    }
+  ]
+}
 ```
+
+O recebimento de `unitPrice` é uma decisão temporária deste projeto de estudos. Quando houver uma fonte de preços, a aplicação deverá obtê-lo por uma porta de saída usando `productId`; os cálculos do domínio e a fotografia persistida não mudam.
 
 ### Validações de entrada
 
@@ -266,9 +291,11 @@ Pedido recebido com sucesso
 | --- | --- |
 | `customerId` | Obrigatório e representado por UUID |
 | `paymentMethod` | Obrigatório e não pode ser vazio ou composto apenas por espaços |
+| `currency` | Obrigatória e validada pelo domínio como código monetário ISO 4217 |
 | `items` | Obrigatório e deve conter pelo menos um item |
 | `items[].productId` | Obrigatório e representado por UUID |
 | `items[].quantity` | Deve ser maior que zero |
+| `items[].unitPrice` | Obrigatório, maior que zero, com até 17 dígitos inteiros e duas casas decimais |
 
 O `@Valid` no método HTTP ativa a validação do request e a validação em cascata dos itens.
 
@@ -299,6 +326,9 @@ orders.orders
 ├── id UUID PK
 ├── customer_id UUID
 ├── payment_method VARCHAR(50)
+├── status VARCHAR(40)
+├── total_amount NUMERIC(19,2)
+├── currency CHAR(3)
 ├── created_at TIMESTAMPTZ
 └── version INTEGER
 
@@ -307,8 +337,12 @@ orders.order_items
 ├── order_id UUID FK → orders.orders.id
 ├── product_id UUID
 ├── quantity INTEGER CHECK > 0
+├── unit_price NUMERIC(19,2) CHECK > 0
+├── subtotal NUMERIC(19,2) CHECK > 0
 └── item_index INTEGER
 ```
+
+A migration `V2` adiciona a fotografia comercial e o estado, com checks de formato, positividade, completude e coerência entre quantidade, preço e subtotal. Ela não inventa valores para pedidos legados: as novas colunas permanecem nulas apenas nos registros anteriores à `ORDER-01`, enquanto todo pedido criado pela aplicação nova grava a fotografia completa. Antes de implementar consultas de pedidos, será necessário definir como apresentar ou arquivar esses registros legados.
 
 `@MappedCollection` configura `order_id` como chave estrangeira e `item_index` como a posição da lista. `@Version` permite ao Spring Data JDBC distinguir um agregado novo, mesmo com UUID gerado pela aplicação, e oferece controle otimista de concorrência.
 
@@ -320,8 +354,8 @@ Nos testes de integração, `PostgresTestcontainersConfiguration` fornece um Pos
 
 `CreateOrderService.createOrder` é transacional. Dentro do mesmo limite, o serviço:
 
-1. cria os Value Objects e itens e chama `Order.place(...)`;
-2. a Aggregate Root valida seu estado e registra `OrderPlacedDomainEvent`;
+1. cria os Value Objects e itens com os preços declarados e chama `Order.place(...)`;
+2. cada item calcula seu subtotal; a Aggregate Root calcula o total, assume `AGUARDANDO_ESTOQUE` e registra `OrderPlacedDomainEvent`;
 3. persiste o agregado através da porta `OrderRepository`;
 4. entrega o Domain Event interno à porta `OrderEventPublisher`;
 5. o adaptador `SpringOrderEventPublisher` o traduz em `OrderCreatedEvent` e publica o contrato público;
@@ -361,7 +395,7 @@ A validação final foi executada em 01/09/2026 com Java 25 e PostgreSQL 18.6 vi
 ```text
 ./mvnw clean test
 
-Tests run: 45, Failures: 0, Errors: 0, Skipped: 0
+Tests run: 50, Failures: 0, Errors: 0, Skipped: 0
 BUILD SUCCESS
 ```
 
@@ -372,7 +406,7 @@ Esse resultado inclui a verificação do Spring Modulith, as quatro regras ArchU
 1. **Monólito modular:** os módulos permanecem no mesmo deploy, com fronteiras verificáveis.
 2. **Hexagonal dentro de `order`:** o módulo continua orientado ao negócio e organiza internamente entradas, núcleo e saídas.
 3. **API pública mínima:** somente `OrderCreatedEvent` é compartilhado por `order`.
-4. **DDD tático no núcleo:** `Order` é a Aggregate Root, `OrderItem` é uma Entity interna e seis Value Objects tornam regras e tipos explícitos.
+4. **DDD tático no núcleo:** `Order` é a Aggregate Root, `OrderItem` é uma Entity interna e os Value Objects, incluindo `Money`, tornam regras e tipos explícitos.
 5. **Domínio puro:** modelo e Domain Events internos não dependem de Spring ou JDBC.
 6. **Porta de entrada explícita:** o controller depende de `CreateOrderUseCase`, não da classe concreta do serviço.
 7. **Portas de saída explícitas:** persistência e eventos são capacidades solicitadas pela aplicação.
@@ -381,7 +415,7 @@ Esse resultado inclui a verificação do Spring Modulith, as quatro regras ArchU
 10. **Criação diferente de reconstituição:** somente `Order.place(...)` registra `OrderPlacedDomainEvent`.
 11. **Persistência antes da publicação:** o Domain Event é registrado pela raiz durante a criação, mas só é enviado à porta depois de `save` retornar; o adaptador então o traduz e publica.
 12. **Transação única de origem:** pedido, itens e registro da publicação confirmam ou sofrem rollback juntos.
-13. **Contrato HTTP preservado:** a reorganização interna não altera caminho, validação, status ou mensagem.
+13. **Contrato HTTP explícito:** o caminho permanece estável; a entrada recebe preço unitário e moeda provisoriamente, e a resposta JSON expõe a fotografia calculada e o estado inicial.
 14. **Banco versionado:** alterações no esquema de negócio são feitas por migrations Flyway.
 
 ## Limitações e próximos passos
