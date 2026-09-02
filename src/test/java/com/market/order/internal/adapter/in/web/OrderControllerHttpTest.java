@@ -64,4 +64,18 @@ class OrderControllerHttpTest {
                                 """))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void rejectsNullItemsInsteadOfLettingThemReachTheController() throws Exception {
+        mockMvc.perform(post("/api/v1/order")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "customerId": "550e8400-e29b-41d4-a716-446655440000",
+                                  "paymentMethod": "PIX",
+                                  "items": [null]
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+    }
 }

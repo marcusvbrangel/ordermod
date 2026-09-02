@@ -5,6 +5,8 @@ import com.market.order.OrderCreatedEvent;
 import com.market.order.internal.application.port.in.CreateOrderCommand;
 import com.market.order.internal.application.port.in.CreateOrderUseCase;
 import com.market.order.internal.application.port.out.OrderEventPublisher;
+import com.market.order.internal.domain.event.OrderDomainEvent;
+import com.market.order.internal.domain.event.OrderPlacedDomainEvent;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -65,16 +67,41 @@ class CreateOrderTransactionIntegrationTest {
         @Primary
         OrderEventPublisher failingOrderEventPublisher(ApplicationEventPublisher delegate) {
             return event -> {
-                delegate.publishEvent(event);
+                delegate.publishEvent(toIntegrationEvent(event));
                 throw new PublicationFailure(event);
             };
+        }
+
+        private OrderCreatedEvent toIntegrationEvent(OrderDomainEvent event) {
+            if (!(event instanceof OrderPlacedDomainEvent placedEvent)) {
+                throw new IllegalArgumentException("Evento de domínio não suportado: " + event.getClass().getName());
+            }
+
+            return new OrderCreatedEvent(
+                    placedEvent.orderId().value(),
+                    placedEvent.occurredAt(),
+                    placedEvent.customerId().value(),
+                    placedEvent.paymentMethod().value(),
+                    placedEvent.items().stream()
+                            .map(item -> new OrderCreatedEvent.Item(
+                                    item.productId().value(),
+                                    item.quantity().value()
+                            ))
+                            .toList()
+            );
         }
     }
 
     static class PublicationFailure extends RuntimeException {
 
-        PublicationFailure(OrderCreatedEvent event) {
-            super("Falha simulada após publicar o pedido " + event.orderId());
+        PublicationFailure(OrderDomainEvent event) {
+            super("Falha simulada após publicar o pedido " + orderIdOf(event));
+        }
+
+        private static Object orderIdOf(OrderDomainEvent event) {
+            return event instanceof OrderPlacedDomainEvent placedEvent
+                    ? placedEvent.orderId().value()
+                    : event.getClass().getSimpleName();
         }
     }
 }

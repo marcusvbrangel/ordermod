@@ -1,13 +1,18 @@
 package com.market.order.internal.application.service;
 
-import com.market.order.OrderCreatedEvent;
 import com.market.order.internal.application.port.in.CreateOrderCommand;
 import com.market.order.internal.application.port.in.CreateOrderResult;
 import com.market.order.internal.application.port.in.CreateOrderUseCase;
 import com.market.order.internal.application.port.out.OrderEventPublisher;
 import com.market.order.internal.application.port.out.OrderRepository;
+import com.market.order.internal.domain.model.CustomerId;
 import com.market.order.internal.domain.model.Order;
+import com.market.order.internal.domain.model.OrderId;
 import com.market.order.internal.domain.model.OrderItem;
+import com.market.order.internal.domain.model.OrderItemId;
+import com.market.order.internal.domain.model.PaymentMethod;
+import com.market.order.internal.domain.model.ProductId;
+import com.market.order.internal.domain.model.Quantity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,42 +39,29 @@ public class CreateOrderService implements CreateOrderUseCase {
     public CreateOrderResult createOrder(CreateOrderCommand command) {
         Objects.requireNonNull(command, "command é obrigatório");
 
-        var order = new Order(
-                UUID.randomUUID(),
-                command.customerId(),
-                command.paymentMethod(),
+        var order = Order.place(
+                new OrderId(UUID.randomUUID()),
+                new CustomerId(command.customerId()),
+                new PaymentMethod(command.paymentMethod()),
                 Instant.now(),
-                null,
                 command.items().stream()
-                        .map(item -> new OrderItem(
-                                UUID.randomUUID(),
-                                item.productId(),
-                                item.quantity()
+                        .map(item -> OrderItem.create(
+                                new OrderItemId(UUID.randomUUID()),
+                                new ProductId(item.productId()),
+                                new Quantity(item.quantity())
                         ))
                         .toList()
         );
 
         var savedOrder = orderRepository.save(order);
 
-        publishOrderCreatedEvent(savedOrder);
+        publishDomainEvents(order);
 
-        return new CreateOrderResult(savedOrder.id());
+        return new CreateOrderResult(savedOrder.id().value());
     }
 
-    private void publishOrderCreatedEvent(Order order) {
-        var orderCreatedEvent = new OrderCreatedEvent(
-                order.id(),
-                order.createdAt(),
-                order.customerId(),
-                order.paymentMethod(),
-                order.items().stream()
-                        .map(item -> new OrderCreatedEvent.Item(
-                                item.productId(),
-                                item.quantity()
-                        ))
-                        .toList()
-        );
-
-        eventPublisher.publish(orderCreatedEvent);
+    private void publishDomainEvents(Order order) {
+        order.domainEvents().forEach(eventPublisher::publish);
+        order.clearDomainEvents();
     }
 }

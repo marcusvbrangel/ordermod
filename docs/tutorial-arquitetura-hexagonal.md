@@ -2,6 +2,8 @@
 
 Este tutorial explica arquitetura hexagonal usando o módulo `order` deste projeto como exemplo concreto. A proposta não é apresentar somente definições: vamos acompanhar o caminho real de uma requisição desde o HTTP, passando pelo domínio e pelo PostgreSQL, até a publicação do evento consumido por outros módulos.
 
+O núcleo também aplica padrões de DDD. Depois deste percurso pelas portas e adaptadores, aprofunde Aggregate Root, Entity, Value Objects e Domain Events no [tutorial de DDD tático](tutorial-ddd-tatico.md).
+
 ## 1. O problema que a arquitetura hexagonal resolve
 
 Uma aplicação Spring pode começar de forma simples:
@@ -107,11 +109,20 @@ com/market/order
 ├── package-info.java
 └── internal
     ├── domain
-    │   ├── model
-    │   │   ├── Order.java
-    │   │   └── OrderItem.java
+    │   ├── event
+    │   │   ├── OrderDomainEvent.java
+    │   │   └── OrderPlacedDomainEvent.java
     │   ├── exception
     │   │   └── OrderDomainException.java
+    │   ├── model
+    │   │   ├── CustomerId.java
+    │   │   ├── Order.java
+    │   │   ├── OrderId.java
+    │   │   ├── OrderItem.java
+    │   │   ├── OrderItemId.java
+    │   │   ├── PaymentMethod.java
+    │   │   ├── ProductId.java
+    │   │   └── Quantity.java
     │   └── package-info.java
     │
     ├── application
@@ -162,7 +173,7 @@ O domínio contém os conceitos que existiriam mesmo se o projeto deixasse de us
 
 ### 5.1 `Order` e `OrderItem`
 
-[Order.java](../src/main/java/com/market/order/internal/domain/model/Order.java) e [OrderItem.java](../src/main/java/com/market/order/internal/domain/model/OrderItem.java) são records Java sem anotações do Spring Data.
+[Order.java](../src/main/java/com/market/order/internal/domain/model/Order.java) é a Aggregate Root. [OrderItem.java](../src/main/java/com/market/order/internal/domain/model/OrderItem.java) é uma Entity interna ao agregado. São classes Java sem anotações do Spring Data e possuem igualdade baseada, respectivamente, em `OrderId` e `OrderItemId`.
 
 Algumas invariantes protegidas por essas classes são:
 
@@ -174,24 +185,22 @@ Algumas invariantes protegidas por essas classes são:
 - versão não negativa;
 - cópia defensiva da lista de itens.
 
-Trecho simplificado de `OrderItem`:
+Os valores do modelo são expressos por seis records imutáveis: `OrderId`, `CustomerId`, `OrderItemId`, `ProductId`, `Quantity` e `PaymentMethod`. Por exemplo:
 
 ```java
-public record OrderItem(UUID id, UUID productId, int quantity) {
+public record Quantity(int value) {
 
-    public OrderItem {
-        if (productId == null) {
-            throw new OrderDomainException("productId é obrigatório");
-        }
-
-        if (quantity <= 0) {
+    public Quantity {
+        if (value <= 0) {
             throw new OrderDomainException("quantity deve ser maior que zero");
         }
     }
 }
 ```
 
-A regra está no domínio porque uma quantidade inválida continua sendo inválida independentemente de a entrada vir de HTTP, mensageria, linha de comando ou teste.
+A regra está no Value Object porque uma quantidade inválida continua sendo inválida independentemente de a entrada vir de HTTP, mensageria, linha de comando ou teste.
+
+`Order.place(...)` cria um pedido novo e registra `OrderPlacedDomainEvent`. `Order.reconstitute(...)` recria um pedido persistido, incluindo sua versão, sem registrar novamente o fato de criação. O [tutorial de DDD tático](tutorial-ddd-tatico.md) explica em detalhes o agregado e essa separação.
 
 ### 5.2 `OrderDomainException`
 
@@ -209,6 +218,8 @@ O domínio e o banco possuem objetivos diferentes:
 - uma regra de negócio não deve ser limitada pela estrutura de uma tabela.
 
 O campo `version` no domínio é uma escolha pragmática para preservar o controle otimista entre leituras e gravações, mas ele não possui nenhuma anotação do Spring.
+
+Ao reconstruir o domínio, o mapper chama `Order.reconstitute(...)`. Usar `Order.place(...)` nesse caminho produziria um Domain Event falso a cada leitura do banco.
 
 ## 6. Portas de entrada: o que a aplicação permite fazer
 
@@ -265,10 +276,12 @@ public class CreateOrderService implements CreateOrderUseCase {
 
 O serviço de aplicação coordena o fluxo, mas não implementa JDBC nem HTTP. Suas responsabilidades atuais são:
 
-1. transformar o comando em `Order` e `OrderItem`;
-2. pedir que o agregado seja persistido;
-3. montar e publicar `OrderCreatedEvent` usando o agregado salvo;
-4. retornar `CreateOrderResult`.
+1. transformar o comando em Entities e Value Objects;
+2. criar a Aggregate Root com `Order.place(...)`, que registra `OrderPlacedDomainEvent`;
+3. pedir que o agregado seja persistido;
+4. entregar os Domain Events pendentes à porta de publicação;
+5. limpar os eventos internos depois do despacho bem-sucedido;
+6. retornar `CreateOrderResult` com o identificador persistido.
 
 O método é transacional. Portanto, a persistência do pedido e o registro durável da publicação confirmam ou sofrem rollback juntos.
 
@@ -298,11 +311,11 @@ O caso de uso sabe que precisa salvar um pedido. Ele não sabe se isso será fei
 ```java
 public interface OrderEventPublisher {
 
-    void publish(OrderCreatedEvent event);
+    void publish(OrderDomainEvent event);
 }
 ```
 
-O caso de uso sabe que precisa anunciar o fato `OrderCreatedEvent`. Ele não conhece diretamente `ApplicationEventPublisher`.
+O caso de uso sabe que precisa despachar os fatos registrados pela Aggregate Root. Ele não conhece `OrderCreatedEvent` nem `ApplicationEventPublisher`; a tradução e a tecnologia pertencem ao adaptador de saída.
 
 Esse desenho aplica a inversão de dependência:
 
@@ -404,6 +417,8 @@ OrderItemJdbcEntity → OrderItem
 
 O mapper é o custo explícito de manter o domínio independente da persistência. Esse custo evita que o modelo de negócio fique acoplado às anotações e decisões relacionais.
 
+Na ida, o mapper extrai os valores de `OrderId`, `CustomerId`, `PaymentMethod`, `OrderItemId`, `ProductId` e `Quantity`. Na volta, recria esses seis Value Objects e chama `Order.reconstitute(...)` e `OrderItem.reconstitute(...)`, evitando a geração de eventos de criação durante a hidratação.
+
 ### 10.4 Implementação da porta
 
 [OrderPersistenceAdapter.java](../src/main/java/com/market/order/internal/adapter/out/persistence/jdbc/OrderPersistenceAdapter.java) implementa a porta `OrderRepository`:
@@ -434,17 +449,42 @@ public class SpringOrderEventPublisher implements OrderEventPublisher {
     private final ApplicationEventPublisher eventPublisher;
 
     @Override
-    public void publish(OrderCreatedEvent event) {
-        eventPublisher.publishEvent(event);
+    public void publish(OrderDomainEvent event) {
+        if (!(event instanceof OrderPlacedDomainEvent placedEvent)) {
+            throw new IllegalArgumentException("Evento de domínio não suportado");
+        }
+
+        eventPublisher.publishEvent(new OrderCreatedEvent(
+                placedEvent.orderId().value(),
+                placedEvent.occurredAt(),
+                placedEvent.customerId().value(),
+                placedEvent.paymentMethod().value(),
+                placedEvent.items().stream()
+                        .map(item -> new OrderCreatedEvent.Item(
+                                item.productId().value(),
+                                item.quantity().value()
+                        ))
+                        .toList()
+        ));
     }
 }
 ```
 
-Se a estratégia de publicação mudar no futuro, uma nova implementação da porta poderá ser criada sem colocar APIs técnicas dentro de `CreateOrderService`.
+O código real também rejeita tipos de Domain Event não suportados antes de publicar. Se a estratégia de publicação ou o contrato externo mudar no futuro, uma nova implementação da porta poderá ser criada sem colocar APIs técnicas dentro de `CreateOrderService`.
 
-## 12. Evento público e comunicação entre módulos
+## 12. Evento de domínio e evento público
+
+[OrderPlacedDomainEvent.java](../src/main/java/com/market/order/internal/domain/event/OrderPlacedDomainEvent.java) representa internamente o fato registrado por `Order.place(...)`. Ele usa Value Objects e fica em `internal`, portanto outros módulos não podem depender dele.
 
 [OrderCreatedEvent.java](../src/main/java/com/market/order/OrderCreatedEvent.java) fica fora de `internal` porque representa a API pública do módulo `order`.
+
+```text
+Order.place(...)
+    → OrderPlacedDomainEvent          interno, com Value Objects
+    → OrderEventPublisher            porta recebe o fato interno
+    → SpringOrderEventPublisher      traduz na borda
+    → OrderCreatedEvent              público, com tipos simples
+```
 
 Depois da publicação:
 
@@ -471,7 +511,7 @@ sequenceDiagram
     participant Http as OrderController
     participant Port as CreateOrderUseCase
     participant App as CreateOrderService
-    participant Domain as Order / OrderItem
+    participant Domain as Order (Aggregate Root)
     participant RepoPort as OrderRepository
     participant Jdbc as OrderPersistenceAdapter
     participant DB as PostgreSQL
@@ -483,16 +523,20 @@ sequenceDiagram
     Http->>Http: request → command
     Http->>Port: createOrder(command)
     Port->>App: implementação injetada pelo Spring
-    App->>Domain: cria agregado e valida invariantes
+    App->>App: comando → Entities e Value Objects
+    App->>Domain: Order.place(...)
+    Domain->>Domain: valida e registra OrderPlacedDomainEvent
     App->>RepoPort: save(order)
     RepoPort->>Jdbc: implementação injetada pelo Spring
     Jdbc->>Jdbc: domínio → entidades JDBC
     Jdbc->>DB: INSERT do pedido e itens
     DB-->>Jdbc: agregado salvo, version = 0
-    Jdbc-->>App: entidade → domínio
-    App->>EventPort: publish(OrderCreatedEvent)
+    Jdbc-->>App: Order.reconstitute(...)
+    App->>Domain: domainEvents()
+    App->>EventPort: publish(OrderPlacedDomainEvent)
     EventPort->>Events: implementação injetada pelo Spring
-    Events-->>Consumers: evento público
+    Events->>Events: Domain Event → OrderCreatedEvent
+    Events-->>Consumers: evento público pelo Spring
     App-->>Http: CreateOrderResult
     Http-->>Client: 201 Pedido recebido com sucesso
 ```
@@ -506,13 +550,18 @@ CreateOrderRequest             adapter.in.web
   ↓
 CreateOrderCommand             application.port.in
   ↓
-Order + OrderItem              domain.model
+Order + OrderItem +            domain.model
+seis Value Objects
   ↓
 OrderJdbcEntity + itens        adapter.out.persistence.jdbc
   ↓
 PostgreSQL
 
-Order + OrderItem
+Order.place(...)
+  ↓
+OrderPlacedDomainEvent         domain.event interno
+  ↓ OrderEventPublisher
+SpringOrderEventPublisher      tradução na borda
   ↓
 OrderCreatedEvent              API pública de order
   ↓
@@ -525,12 +574,12 @@ A organização dos testes acompanha as responsabilidades do código:
 
 | Teste | O que protege |
 | --- | --- |
-| `OrderTest` e `OrderItemTest` | Invariantes e exceções do domínio |
-| `CreateOrderServiceTest` | Caso de uso por meio de portas falsas, sem Spring e banco |
+| `OrderTest` e `OrderItemTest` | Invariantes, identidade, criação/reconstituição e Domain Events |
+| `CreateOrderServiceTest` | Caso de uso, ordem persistir/publicar, despacho e limpeza do evento interno |
 | `OrderControllerTest` | Conversão de request para command |
 | `OrderControllerHttpTest` | Contrato HTTP e validação com MockMvc |
-| `OrderPersistenceMapperTest` | Conversão domínio ↔ JDBC |
-| `SpringOrderEventPublisherTest` | Delegação para o publicador Spring |
+| `OrderPersistenceMapperTest` | Conversão dos Value Objects, domínio ↔ JDBC e reconstituição sem evento falso |
+| `SpringOrderEventPublisherTest` | Tradução do Domain Event para o contrato público e delegação ao Spring |
 | `OrderPersistenceAdapterTest` | Persistência real com PostgreSQL via Testcontainers |
 | `CreateOrderIntegrationTest` | Pedido, itens e publicações duráveis completas |
 | `CreateOrderTransactionIntegrationTest` | Rollback conjunto de pedido, itens e evento |
@@ -648,11 +697,11 @@ No projeto `OrdermodApplication`, a arquitetura funciona da seguinte forma:
 - o adaptador HTTP converte JSON em um comando de aplicação;
 - a porta de entrada descreve o caso de uso;
 - o serviço de aplicação coordena domínio, persistência e evento;
-- o domínio protege as invariantes sem depender de Spring Data;
+- `Order` protege o agregado e registra `OrderPlacedDomainEvent` sem depender de Spring Data;
+- seis Value Objects tornam valores e invariantes explícitos;
 - as portas de saída descrevem necessidades externas;
 - os adaptadores JDBC e de eventos implementam essas necessidades;
-- `OrderCreatedEvent` funciona como contrato público entre módulos;
+- o adaptador de eventos traduz o Domain Event interno em `OrderCreatedEvent`, contrato público entre módulos;
 - testes unitários, arquiteturais e de integração protegem essas decisões.
 
 A essência não está nos nomes das pastas. Ela está na direção das dependências: regras e casos de uso não devem depender dos detalhes tecnológicos que existem nas bordas da aplicação.
-

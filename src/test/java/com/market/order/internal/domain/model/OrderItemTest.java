@@ -7,53 +7,80 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OrderItemTest {
 
     @Test
-    void createsValidOrderItem() {
-        var id = UUID.randomUUID();
-        var productId = UUID.randomUUID();
+    void createBuildsAnEntityFromDomainValueObjects() {
+        var id = new OrderItemId(UUID.randomUUID());
+        var productId = new ProductId(UUID.randomUUID());
+        var quantity = new Quantity(2);
 
-        var item = new OrderItem(id, productId, 2);
+        var item = OrderItem.create(id, productId, quantity);
 
         assertAll(
                 () -> assertEquals(id, item.id()),
                 () -> assertEquals(productId, item.productId()),
-                () -> assertEquals(2, item.quantity())
+                () -> assertEquals(quantity, item.quantity())
         );
     }
 
     @Test
-    void rejectsNonPositiveQuantity() {
-        var id = UUID.randomUUID();
-        var productId = UUID.randomUUID();
+    void reconstituteRestoresThePersistedEntity() {
+        var id = new OrderItemId(UUID.randomUUID());
+        var productId = new ProductId(UUID.randomUUID());
+        var quantity = new Quantity(5);
 
-        var zeroQuantity = assertThrows(
-                OrderDomainException.class,
-                () -> new OrderItem(id, productId, 0)
-        );
-        var negativeQuantity = assertThrows(
-                OrderDomainException.class,
-                () -> new OrderItem(id, productId, -1)
-        );
+        var item = OrderItem.reconstitute(id, productId, quantity);
 
         assertAll(
-                () -> assertTrue(zeroQuantity.getMessage().contains("quantity")),
-                () -> assertTrue(negativeQuantity.getMessage().contains("quantity"))
+                () -> assertEquals(id, item.id()),
+                () -> assertEquals(productId, item.productId()),
+                () -> assertEquals(quantity, item.quantity())
         );
     }
 
     @Test
-    void rejectsNullIdentifiers() {
-        var id = UUID.randomUUID();
-        var productId = UUID.randomUUID();
+    void orderItemsAreEntitiesWhoseEqualityIsDefinedOnlyByIdentity() {
+        var sharedId = new OrderItemId(UUID.randomUUID());
+        var first = OrderItem.create(
+                sharedId,
+                new ProductId(UUID.randomUUID()),
+                new Quantity(1)
+        );
+        var sameIdentityWithDifferentState = OrderItem.reconstitute(
+                sharedId,
+                new ProductId(UUID.randomUUID()),
+                new Quantity(99)
+        );
+        var anotherIdentity = OrderItem.create(
+                new OrderItemId(UUID.randomUUID()),
+                first.productId(),
+                first.quantity()
+        );
 
         assertAll(
-                () -> assertThrows(OrderDomainException.class, () -> new OrderItem(null, productId, 1)),
-                () -> assertThrows(OrderDomainException.class, () -> new OrderItem(id, null, 1))
+                () -> assertEquals(first, sameIdentityWithDifferentState),
+                () -> assertEquals(first.hashCode(), sameIdentityWithDifferentState.hashCode()),
+                () -> assertNotEquals(first, anotherIdentity)
+        );
+    }
+
+    @Test
+    void rejectsNullRequiredConcepts() {
+        var id = new OrderItemId(UUID.randomUUID());
+        var productId = new ProductId(UUID.randomUUID());
+        var quantity = new Quantity(1);
+
+        assertAll(
+                () -> assertThrows(OrderDomainException.class,
+                        () -> OrderItem.create(null, productId, quantity)),
+                () -> assertThrows(OrderDomainException.class,
+                        () -> OrderItem.create(id, null, quantity)),
+                () -> assertThrows(OrderDomainException.class,
+                        () -> OrderItem.create(id, productId, null))
         );
     }
 }

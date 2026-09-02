@@ -42,6 +42,10 @@ HTTP
 - PostgreSQL 18.6 isolado para testes através de Testcontainers.
 - Persistência, publicação durável e rollback protegidos por testes de integração.
 - Contrato HTTP protegido com MockMvc standalone.
+- `Order` modelado como Aggregate Root e `OrderItem` como Entity interna.
+- Seis Value Objects protegendo identidade, quantidade e forma de pagamento.
+- Criação e reconstituição separadas para impedir eventos de domínio falsos.
+- Evento de domínio interno traduzido para o contrato público somente no adaptador.
 
 ## Evolução para arquitetura hexagonal
 
@@ -119,4 +123,4 @@ Também permanece necessária uma estratégia de migration para a tabela de publ
 
 ## Conclusão
 
-A refatoração tornou as fronteiras internas de `order` mais explícitas sem alterar sua fronteira pública no Spring Modulith. O projeto agora possui uma base hexagonal coerente e verificada: domínio puro, aplicação orientada a portas e detalhes técnicos nas bordas. A execução final de `./mvnw clean test` com Java 25 concluiu 27 testes sem falhas, erros ou testes ignorados. A próxima evolução pode concentrar-se em idempotência, persistência de estoque e regras de pagamento.
+A refatoração tornou as fronteiras internas de `order` mais explícitas sem alterar sua fronteira pública no Spring Modulith. O projeto agora possui uma base hexagonal coerente e verificada, complementada por um modelo DDD tático educacional: domínio puro, aplicação orientada a portas, Aggregate Root, Entity, Value Objects, Domain Event e detalhes técnicos nas bordas. A execução final de `./mvnw clean test` com Java 25 concluiu 45 testes sem falhas, erros ou testes ignorados. A próxima evolução pode concentrar-se em idempotência, persistência de estoque e regras de pagamento.

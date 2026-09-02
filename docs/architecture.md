@@ -1,8 +1,8 @@
 # Arquitetura do Ordermod
 
-Este documento descreve a arquitetura atualmente implementada no projeto. O sistema é um monólito modular construído com Spring Boot e Spring Modulith, organizado por capacidades de negócio. Dentro do módulo `order`, a implementação segue uma arquitetura hexagonal com domínio, portas e adaptadores.
+Este documento descreve a arquitetura atualmente implementada no projeto. O sistema é um monólito modular construído com Spring Boot e Spring Modulith, organizado por capacidades de negócio. Dentro do módulo `order`, a implementação combina arquitetura hexagonal com padrões táticos de Domain-Driven Design (DDD).
 
-Para uma explicação passo a passo, consulte o [tutorial de arquitetura hexagonal](tutorial-arquitetura-hexagonal.md).
+Para explicações passo a passo, consulte o [tutorial de arquitetura hexagonal](tutorial-arquitetura-hexagonal.md) e o [tutorial de DDD tático](tutorial-ddd-tatico.md).
 
 O histórico da refatoração está em [Registro de desenvolvimento — 01/09/2026](development-log-2026-09-01.md). O estado anterior está preservado no [registro de 31/08/2026](development-log-2026-08-31.md).
 
@@ -76,11 +76,20 @@ src/main/java/com/market/order
 ├── package-info.java
 └── internal
     ├── domain
-    │   ├── model
-    │   │   ├── Order.java
-    │   │   └── OrderItem.java
+    │   ├── event
+    │   │   ├── OrderDomainEvent.java
+    │   │   └── OrderPlacedDomainEvent.java
     │   ├── exception
     │   │   └── OrderDomainException.java
+    │   ├── model
+    │   │   ├── CustomerId.java
+    │   │   ├── Order.java
+    │   │   ├── OrderId.java
+    │   │   ├── OrderItem.java
+    │   │   ├── OrderItemId.java
+    │   │   ├── PaymentMethod.java
+    │   │   ├── ProductId.java
+    │   │   └── Quantity.java
     │   └── package-info.java
     ├── application
     │   ├── port
@@ -118,14 +127,15 @@ Os três arquivos `package-info.java` fazem parte do desenho acordado: documenta
 
 | Área | Responsabilidade | Dependências permitidas |
 | --- | --- | --- |
-| `domain.model` | Estado, invariantes e comportamento do negócio | Java; não depende de Spring, JDBC ou adaptadores |
+| `domain.model` | Aggregate Root, Entity, Value Objects, estado, invariantes e comportamento | Java; não depende de Spring, JDBC ou adaptadores |
+| `domain.event` | Fatos internos registrados pelo agregado | Modelo e exceção do domínio; não depende do mecanismo de publicação |
 | `domain.exception` | Exceção específica para violações das invariantes de pedido | Java; não depende de Spring, JDBC ou adaptadores |
 | `application.port.in` | Contratos para iniciar casos de uso | Tipos de entrada e resultado da aplicação |
-| `application.service` | Orquestra o caso de uso e delimita a transação | Domínio, portas de entrada/saída e contrato público do evento |
-| `application.port.out` | Necessidades externas declaradas pela aplicação | Domínio e contrato público do evento |
+| `application.service` | Orquestra o caso de uso, despacha eventos internos e delimita a transação | Domínio e portas de entrada/saída |
+| `application.port.out` | Necessidades externas declaradas pela aplicação | Domínio; não depende da API técnica do Spring |
 | `adapter.in.web` | Converte HTTP em chamada de caso de uso | Porta de entrada; não chama persistência diretamente |
 | `adapter.out.persistence.jdbc` | Traduz o domínio e persiste com Spring Data JDBC | Porta de saída, domínio, JDBC e entidades relacionais |
-| `adapter.out.event` | Publica o evento pelo mecanismo do Spring | Porta de saída e `ApplicationEventPublisher` |
+| `adapter.out.event` | Traduz o Domain Event em contrato público e o publica pelo Spring | Porta de saída, contrato público e `ApplicationEventPublisher` |
 
 ### Direção das dependências
 
@@ -135,7 +145,8 @@ As dependências de código apontam dos adaptadores para as portas e para o núc
 flowchart LR
     HTTP[Adaptador HTTP] --> InPort[CreateOrderUseCase]
     InPort --> Service[CreateOrderService]
-    Service --> Domain[Order / OrderItem]
+    Service --> Domain[Order / OrderItem / Value Objects]
+    Domain --> DomainEvent[OrderPlacedDomainEvent]
     Service --> RepositoryPort[OrderRepository]
     Service --> EventPort[OrderEventPublisher]
     Persistence[Adaptador JDBC] --> RepositoryPort
@@ -156,6 +167,7 @@ sequenceDiagram
     participant Controller as OrderController
     participant InPort as CreateOrderUseCase
     participant Service as CreateOrderService
+    participant Aggregate as Order (Aggregate Root)
     participant Repository as OrderRepository (porta)
     participant Jdbc as OrderPersistenceAdapter
     participant Database as PostgreSQL
@@ -167,16 +179,20 @@ sequenceDiagram
     Controller->>Controller: request → CreateOrderCommand
     Controller->>InPort: createOrder(command)
     InPort->>Service: executa caso de uso
-    Service->>Service: cria Order e OrderItem
+    Service->>Service: comando → Value Objects e OrderItem
+    Service->>Aggregate: Order.place(...)
+    Aggregate->>Aggregate: valida e registra OrderPlacedDomainEvent
     Service->>Repository: save(order)
     Repository->>Jdbc: implementação injetada
     Jdbc->>Jdbc: domínio → entidades JDBC
     Jdbc->>Database: INSERT pedido e itens
     Database-->>Jdbc: agregado persistido
-    Jdbc-->>Service: entidades JDBC → domínio
-    Service->>EventPort: publish(OrderCreatedEvent)
+    Jdbc-->>Service: Order.reconstitute(...)
+    Service->>Aggregate: domainEvents()
+    Service->>EventPort: publish(OrderPlacedDomainEvent)
     EventPort->>Events: implementação injetada
-    Events->>Listener: publicação pelo Spring Modulith
+    Events->>Events: Domain Event → OrderCreatedEvent
+    Events->>Listener: evento público pelo Spring Modulith
     Service-->>Controller: CreateOrderResult(orderId)
     Controller-->>Client: 201 Pedido recebido com sucesso
 ```
@@ -190,16 +206,22 @@ CreateOrderRequest                  contrato HTTP
         ↓ OrderController
 CreateOrderCommand                  entrada do caso de uso
         ↓ CreateOrderService
-Order + OrderItem                   domínio puro
+Order + OrderItem + seis Value Objects
+        ↓ Order.place(...)
+OrderPlacedDomainEvent              fato interno do domínio
+
+Order + OrderItem + Value Objects   domínio puro
         ↓ OrderPersistenceMapper
 OrderJdbcEntity + OrderItemJdbcEntity
         ↓ Spring Data JDBC
 orders.orders + orders.order_items
 
-Order + OrderItem
-        ↓ CreateOrderService
-OrderCreatedEvent
-        ↓ SpringOrderEventPublisher
+OrderPlacedDomainEvent
+        ↓ OrderEventPublisher
+SpringOrderEventPublisher            tradução na borda
+        ↓
+OrderCreatedEvent                   contrato público
+        ↓ ApplicationEventPublisher
 InventoryOrderCreatedListener / NotificationOrderCreatedListener
 ```
 
@@ -267,7 +289,7 @@ O domínio não possui anotações do Spring Data JDBC. O mapeamento relacional 
 - `OrderJdbcEntity` representa `orders.orders` e é a raiz do agregado JDBC;
 - `OrderItemJdbcEntity` representa `orders.order_items`;
 - `SpringDataOrderRepository` é o `CrudRepository` técnico;
-- `OrderPersistenceMapper` converte domínio e entidades nos dois sentidos;
+- `OrderPersistenceMapper` desembrulha os Value Objects na ida e usa `reconstitute(...)` na volta;
 - `OrderPersistenceAdapter` implementa a porta `OrderRepository` usada pelo caso de uso.
 
 O esquema relacional versionado pelo Flyway é:
@@ -298,12 +320,18 @@ Nos testes de integração, `PostgresTestcontainersConfiguration` fornece um Pos
 
 `CreateOrderService.createOrder` é transacional. Dentro do mesmo limite, o serviço:
 
-1. cria o agregado de domínio;
-2. persiste através da porta `OrderRepository`;
-3. cria `OrderCreatedEvent` a partir do agregado persistido;
-4. publica através da porta `OrderEventPublisher`.
+1. cria os Value Objects e itens e chama `Order.place(...)`;
+2. a Aggregate Root valida seu estado e registra `OrderPlacedDomainEvent`;
+3. persiste o agregado através da porta `OrderRepository`;
+4. entrega o Domain Event interno à porta `OrderEventPublisher`;
+5. o adaptador `SpringOrderEventPublisher` o traduz em `OrderCreatedEvent` e publica o contrato público;
+6. depois da publicação bem-sucedida, o serviço limpa os eventos pendentes da raiz.
 
-`SpringOrderEventPublisher` é o único adaptador que conhece `ApplicationEventPublisher`. Assim, o caso de uso não depende diretamente da API técnica de publicação do Spring.
+`Order.place(...)` representa uma criação nova e registra o fato de domínio. `Order.reconstitute(...)`, usado pelo mapper ao reconstruir dados persistidos, preserva a versão e não registra um novo evento. Assim, uma leitura do banco não é confundida com a colocação de outro pedido.
+
+`OrderPlacedDomainEvent` permanece em `internal.domain.event` e usa os Value Objects do modelo. `OrderCreatedEvent` permanece na raiz pública de `com.market.order` e usa tipos simples no contrato consumido por outros módulos. A tradução entre os dois ocorre no adaptador de saída, na fronteira com o mecanismo Spring.
+
+`SpringOrderEventPublisher` é o único adaptador que conhece `OrderCreatedEvent` e `ApplicationEventPublisher`. Assim, o caso de uso trabalha apenas com `OrderDomainEvent` e não depende do contrato público nem da API técnica de publicação do Spring.
 
 O Spring Modulith registra em `event_publication` as publicações destinadas aos listeners transacionais. A propriedade de inicialização automática do esquema JDBC continua adequada ao desenvolvimento; em produção, essa estrutura deve ser criada por migration versionada.
 
@@ -319,31 +347,42 @@ A suíte cobre níveis diferentes da arquitetura e do fluxo:
 | --- | --- |
 | Módulos | `ModularityTests` executa `ApplicationModules.verify()` para detectar ciclos e acessos indevidos entre módulos |
 | Hexagonal | `HexagonalArchitectureTests` aplica quatro regras ArchUnit sobre domínio, aplicação, portas e adaptadores de entrada |
-| Domínio | `OrderTest` e `OrderItemTest` verificam invariantes, normalização e imutabilidade sem Spring |
-| Caso de uso | `CreateOrderServiceTest` verifica `save` antes de `publish`, conteúdo do evento, resultado e falhas das portas |
+| Domínio | `OrderTest` e `OrderItemTest` verificam invariantes, identidade, criação/reconstituição, eventos, normalização e imutabilidade sem Spring |
+| Caso de uso | `CreateOrderServiceTest` verifica `save` antes de `publish`, despacho do evento interno, limpeza, resultado e falhas das portas |
 | Adaptador HTTP | `OrderControllerTest` verifica o mapeamento; `OrderControllerHttpTest` usa MockMvc standalone para validar `201`, texto de sucesso e `400` |
-| Mapper e eventos | `OrderPersistenceMapperTest` verifica as conversões; `SpringOrderEventPublisherTest` verifica a delegação técnica |
+| Mapper e eventos | `OrderPersistenceMapperTest` verifica Value Objects, conversões e reconstituição sem evento falso; `SpringOrderEventPublisherTest` verifica a tradução para o evento público e a delegação técnica |
 | Persistência | `OrderPersistenceAdapterTest` usa PostgreSQL 18.6 isolado, migration V1, INSERT com versão `0`, índices `0/1` e UPDATE com versão `1` |
 | Integração de eventos | `CreateOrderIntegrationTest` comprova pedido, itens e duas publicações `COMPLETED`, para `inventory` e `notification` |
 | Transação | `CreateOrderTransactionIntegrationTest` comprova rollback de pedido, itens e `event_publication` após falha simulada |
 | Contexto | `OrdermodApplicationTests` comprova o carregamento da aplicação com o PostgreSQL de teste |
 
-Em 01/09/2026, `./mvnw clean test` foi executado com Java 25: 27 testes, sem falhas, erros ou testes ignorados, com `BUILD SUCCESS`.
+A validação final foi executada em 01/09/2026 com Java 25 e PostgreSQL 18.6 via Testcontainers:
+
+```text
+./mvnw clean test
+
+Tests run: 45, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+Esse resultado inclui a verificação do Spring Modulith, as quatro regras ArchUnit, os testes do modelo DDD, o contrato HTTP, o mapper, a persistência JDBC, a publicação para os dois consumidores e o rollback transacional.
 
 ## Decisões arquiteturais
 
 1. **Monólito modular:** os módulos permanecem no mesmo deploy, com fronteiras verificáveis.
 2. **Hexagonal dentro de `order`:** o módulo continua orientado ao negócio e organiza internamente entradas, núcleo e saídas.
 3. **API pública mínima:** somente `OrderCreatedEvent` é compartilhado por `order`.
-4. **Domínio puro:** `Order` e `OrderItem` não dependem de Spring ou JDBC.
-5. **Porta de entrada explícita:** o controller depende de `CreateOrderUseCase`, não da classe concreta do serviço.
-6. **Portas de saída explícitas:** persistência e eventos são capacidades solicitadas pela aplicação.
-7. **Adaptadores técnicos isolados:** Spring MVC, Spring Data JDBC e `ApplicationEventPublisher` ficam nas bordas.
-8. **Modelos separados:** request, comando, domínio, entidades JDBC e evento não são reutilizados entre fronteiras.
-9. **Persistência antes do evento:** o fato público usa os dados retornados pelo repositório.
-10. **Transação única de origem:** pedido, itens e registro da publicação confirmam ou sofrem rollback juntos.
-11. **Contrato HTTP preservado:** a reorganização interna não altera caminho, validação, status ou mensagem.
-12. **Banco versionado:** alterações no esquema de negócio são feitas por migrations Flyway.
+4. **DDD tático no núcleo:** `Order` é a Aggregate Root, `OrderItem` é uma Entity interna e seis Value Objects tornam regras e tipos explícitos.
+5. **Domínio puro:** modelo e Domain Events internos não dependem de Spring ou JDBC.
+6. **Porta de entrada explícita:** o controller depende de `CreateOrderUseCase`, não da classe concreta do serviço.
+7. **Portas de saída explícitas:** persistência e eventos são capacidades solicitadas pela aplicação.
+8. **Adaptadores técnicos isolados:** Spring MVC, Spring Data JDBC e `ApplicationEventPublisher` ficam nas bordas.
+9. **Modelos separados:** request, comando, domínio, entidades JDBC, Domain Event e evento público não são reutilizados entre fronteiras.
+10. **Criação diferente de reconstituição:** somente `Order.place(...)` registra `OrderPlacedDomainEvent`.
+11. **Persistência antes da publicação:** o Domain Event é registrado pela raiz durante a criação, mas só é enviado à porta depois de `save` retornar; o adaptador então o traduz e publica.
+12. **Transação única de origem:** pedido, itens e registro da publicação confirmam ou sofrem rollback juntos.
+13. **Contrato HTTP preservado:** a reorganização interna não altera caminho, validação, status ou mensagem.
+14. **Banco versionado:** alterações no esquema de negócio são feitas por migrations Flyway.
 
 ## Limitações e próximos passos
 
@@ -354,3 +393,6 @@ Em 01/09/2026, `./mvnw clean test` foi executado com Java 25: 27 testes, sem fal
 5. Criar migration da estrutura de publicação do Spring Modulith para produção.
 6. Padronizar respostas de erro com `@RestControllerAdvice`.
 7. Fixar uma versão específica da imagem PostgreSQL de desenvolvimento e externalizar credenciais.
+8. Descobrir estados e transições reais do ciclo de pedido antes de adicionar novos padrões táticos.
+
+Event Sourcing, CQRS, Saga, Domain Service, Specification e repository de `OrderItem` não fazem parte desta implementação. Os limites e motivos estão detalhados no [tutorial de DDD tático](tutorial-ddd-tatico.md).
