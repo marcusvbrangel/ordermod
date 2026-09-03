@@ -29,7 +29,6 @@ public class OrderPersistenceAdapter implements OrderRepository {
     public Order save(Order order) {
         LOGGER.debug("Saving order {} with {} item(s)", order.id().value(), order.items().size());
         var savedEntity = repository.save(mapper.toEntity(order));
-        LOGGER.debug("Saved entity {} with {} item(s)", savedEntity.id(), savedEntity.items().size());
 
         return mapper.toDomain(savedEntity);
     }
