@@ -3,14 +3,18 @@ package com.market.order.internal.domain.model;
 import com.market.order.internal.domain.event.OrderDomainEvent;
 import com.market.order.internal.domain.event.OrderPlacedDomainEvent;
 import com.market.order.internal.domain.exception.OrderDomainException;
+import org.jmolecules.ddd.annotation.AggregateRoot;
+import org.jmolecules.ddd.annotation.Identity;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+@AggregateRoot
 public final class Order {
 
+    @Identity
     private final OrderId id;
     private final CustomerId customerId;
     private final PaymentMethod paymentMethod;

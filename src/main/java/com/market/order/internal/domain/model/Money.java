@@ -1,12 +1,14 @@
 package com.market.order.internal.domain.model;
 
 import com.market.order.internal.domain.exception.OrderDomainException;
+import org.jmolecules.ddd.annotation.ValueObject;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Currency;
 import java.util.Locale;
 
+@ValueObject
 public record Money(BigDecimal amount, String currency) {
 
     private static final int SCALE = 2;

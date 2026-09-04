@@ -1,11 +1,15 @@
 package com.market.order.internal.domain.model;
 
 import com.market.order.internal.domain.exception.OrderDomainException;
+import org.jmolecules.ddd.annotation.Entity;
+import org.jmolecules.ddd.annotation.Identity;
 
 import java.util.Objects;
 
+@Entity
 public final class OrderItem {
 
+    @Identity
     private final OrderItemId id;
     private final ProductId productId;
     private final Quantity quantity;
