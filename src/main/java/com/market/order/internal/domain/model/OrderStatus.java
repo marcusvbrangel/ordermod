@@ -1,5 +1,8 @@
 package com.market.order.internal.domain.model;
 
+import org.jmolecules.ddd.annotation.ValueObject;
+
+@ValueObject
 public enum OrderStatus {
     AGUARDANDO_ESTOQUE,
     AGUARDANDO_AUTORIZACAO,
