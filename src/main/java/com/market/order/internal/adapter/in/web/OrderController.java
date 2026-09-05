@@ -1,30 +1,31 @@
 package com.market.order.internal.adapter.in.web;
 
-import com.market.order.internal.application.port.in.CreateOrderCommand;
-import com.market.order.internal.application.port.in.CreateOrderUseCase;
-import com.market.order.internal.application.port.in.GetOrderQuery;
-import com.market.order.internal.application.port.in.GetOrderUseCase;
+import com.market.order.internal.application.port.in.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.annotation.Autowired;
+
+import java.time.LocalDate;
+import java.util.List;
 
 @RestController
 public class OrderController implements OrderHttpApi {
 
     private final CreateOrderUseCase createOrderUseCase;
     private final GetOrderUseCase getOrderUseCase;
-    private final com.market.order.internal.application.port.in.CancelOrderUseCase cancelOrderUseCase;
-
-    public OrderController(CreateOrderUseCase createOrderUseCase, GetOrderUseCase getOrderUseCase) {
-        this(createOrderUseCase, getOrderUseCase, null);
-    }
+    private final CancelOrderUseCase cancelOrderUseCase;
+    private final GenerateOrderReportUseCase generateOrderReportUseCase;
 
     @Autowired
-    public OrderController(CreateOrderUseCase createOrderUseCase, GetOrderUseCase getOrderUseCase, com.market.order.internal.application.port.in.CancelOrderUseCase cancelOrderUseCase) {
+    public OrderController(CreateOrderUseCase createOrderUseCase,
+                           GetOrderUseCase getOrderUseCase,
+                           CancelOrderUseCase cancelOrderUseCase,
+                           GenerateOrderReportUseCase generateOrderReportUseCase) {
         this.createOrderUseCase = createOrderUseCase;
         this.getOrderUseCase = getOrderUseCase;
         this.cancelOrderUseCase = cancelOrderUseCase;
+        this.generateOrderReportUseCase = generateOrderReportUseCase;
     }
 
     @Override
@@ -105,5 +106,19 @@ public class OrderController implements OrderHttpApi {
         );
 
         return ResponseEntity.ok(response);
+    }
+
+    @Override
+    public ResponseEntity<List<OrderReportDTO>> getOrderReport(LocalDate startDate, LocalDate endDate, String status) {
+
+        // 1. Cria a intenção de consulta (Query) exigida pela camada de aplicação...
+        var query = new GenerateOrderReportQuery(startDate, endDate, status);
+
+        // 2. Executa o Caso de Uso de leitura purificado (CQRS)...
+        GenerateOrderReportResult result = generateOrderReportUseCase.execute(query);
+
+        // 3. Retorna a lista de DTOs leve direto para a API...
+        return ResponseEntity.ok(result.records());
+
     }
 }
