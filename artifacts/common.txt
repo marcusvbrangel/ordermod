@@ -203,6 +203,16 @@ Pedido 2: {   "customerId": "22222222-2222-2222-2222-222222222222",   "paymentMe
 ------------------------------------------------------------
 
 
+docker compose up -d
+
+docker compose ps
+
+docker compose logs -f
+
+docker compose logs -f
+
+docker compose logs -f grafana-lgtm
+
 
 
 
@@ -214,12 +224,21 @@ Pedido 2: {   "customerId": "22222222-2222-2222-2222-222222222222",   "paymentMe
 
 
 
-
+Prometheus  → métricas
+Tempo       → traces
+Loki        → logs
+Pyroscope   → profiling
 
 
 
 
 ------------------------------------------------------------
+
+https://spring.io/blog/2025/11/18/opentelemetry-with-spring-boot
+
+https://github.com/danvega/ot
+
+https://docs.spring.io/spring-boot/4.2/reference/actuator/tracing.html?utm_source=chatgpt.com
 
 
 

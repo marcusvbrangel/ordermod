@@ -1,11 +1,50 @@
 spring:
   application:
     name: ordermod
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/ordermod
+    username: myuser
+    password: 1234
+    driver-class-name: org.postgresql.Driver
+
   flyway:
     baseline-on-migrate: true
     baseline-version: 0
+
   modulith:
     events:
       jdbc:
         schema-initialization:
           enabled: true
+
+management:
+  otlp:
+    metrics:
+      export:
+        url: http://localhost:4318/v1/metrics
+
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: http://localhost:4318/v1/traces
+
+    logging:
+      export:
+        otlp:
+          endpoint: http://localhost:4318/v1/logs
+
+  tracing:
+    sampling:
+      probability: 1.0
+
+
+server:
+  shutdown: immediate
+
+
+logging:
+  level:
+    com.market: INFO
+    org.springframework.boot.actuator.autoconfigure.opentelemetry: DEBUG
