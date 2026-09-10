@@ -1,6 +1,8 @@
 package com.market.order.internal.adapter.in.web;
 
 import com.market.order.internal.application.port.in.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,6 +18,8 @@ public class OrderController implements OrderHttpApi {
     private final GetOrderUseCase getOrderUseCase;
     private final CancelOrderUseCase cancelOrderUseCase;
     private final GenerateOrderReportUseCase generateOrderReportUseCase;
+
+    private static Logger LOGGER = LoggerFactory.getLogger(OrderController.class);
 
     @Autowired
     public OrderController(CreateOrderUseCase createOrderUseCase,
@@ -67,6 +71,9 @@ public class OrderController implements OrderHttpApi {
 
     @Override
     public ResponseEntity<GetOrderResponse> getOrder(java.util.UUID orderId) {
+
+        LOGGER.info("Get one Order: {}", orderId);
+
         var result = getOrderUseCase.getOrder(new GetOrderQuery(orderId));
 
         var response = new GetOrderResponse(
