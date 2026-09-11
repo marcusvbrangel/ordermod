@@ -3,6 +3,8 @@ package com.market.order.internal.adapter.in.web;
 import com.market.order.internal.application.port.in.CreateOrderCommand;
 import com.market.order.internal.application.port.in.CreateOrderResult;
 import com.market.order.internal.application.port.in.CreateOrderUseCase;
+import com.market.order.internal.application.port.in.CancelOrderUseCase;
+import com.market.order.internal.application.port.in.GenerateOrderReportUseCase;
 import com.market.order.internal.application.port.in.GetOrderQuery;
 import com.market.order.internal.application.port.in.GetOrderResult;
 import com.market.order.internal.application.port.in.GetOrderUseCase;
@@ -41,7 +43,12 @@ class OrderControllerTest {
                     ))
             );
         };
-        var controller = new OrderController(useCase, unusedGetOrderUseCase());
+        var controller = new OrderController(
+                useCase,
+                unusedGetOrderUseCase(),
+                unusedCancelOrderUseCase(),
+                unusedGenerateOrderReportUseCase()
+        );
         var request = new CreateOrderRequest(
                 customerId,
                 "CREDIT_CARD",
@@ -98,7 +105,7 @@ class OrderControllerTest {
         };
         var controller = new OrderController(command -> {
             throw new AssertionError("criação não deveria ser chamada");
-        }, getOrderUseCase);
+        }, getOrderUseCase, unusedCancelOrderUseCase(), unusedGenerateOrderReportUseCase());
 
         var response = controller.getOrder(orderId);
 
@@ -120,6 +127,18 @@ class OrderControllerTest {
     private static GetOrderUseCase unusedGetOrderUseCase() {
         return query -> {
             throw new AssertionError("consulta não deveria ser chamada");
+        };
+    }
+
+    private static CancelOrderUseCase unusedCancelOrderUseCase() {
+        return command -> {
+            throw new AssertionError("cancelamento não deveria ser chamado");
+        };
+    }
+
+    private static GenerateOrderReportUseCase unusedGenerateOrderReportUseCase() {
+        return query -> {
+            throw new AssertionError("relatório não deveria ser chamado");
         };
     }
 }

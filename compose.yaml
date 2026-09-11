@@ -1,6 +1,20 @@
 services:
   postgres:
     image: 'postgres:18.6'
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - compute_query_id=on
+      - -c
+      - pg_stat_statements.track=all
+      - -c
+      - track_io_timing=on
+      - -c
+      - track_wal_io_timing=on
+      - -c
+      - track_activity_query_size=4096
     environment:
       POSTGRES_DB: ordermod
       POSTGRES_USER: myuser
@@ -9,13 +23,61 @@ services:
       - "5433:5432"
     volumes:
       - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  postgres-observability-init:
+    image: 'postgres:18.6'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ordermod
+      PGUSER: myuser
+      PGPASSWORD: 1234
+      POSTGRES_MONITOR_PASSWORD: ${POSTGRES_MONITOR_PASSWORD:-monitor1234}
+    volumes:
+      - ./observability/postgres/init-observability.sh:/opt/ordermod/init-observability.sh:ro
+    command: ["bash", "/opt/ordermod/init-observability.sh"]
+    restart: "no"
 
   grafana-lgtm:
-    image: 'grafana/otel-lgtm:latest'
+    image: 'grafana/otel-lgtm:0.32.1'
     ports:
       - '3000:3000'
       - '4317:4317'
       - '4318:4318'
+    volumes:
+      - lgtm-data:/data
+      - ./observability/grafana/dashboard-provider.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/ordermod-postgresql.yaml:ro
+      - ./observability/grafana/postgresql-overview.json:/otel-lgtm/grafana-dashboard-postgresql.json:ro
+
+  otel-collector-infra:
+    image: 'grafana/otel-lgtm:0.32.1'
+    user: "0:0"
+    entrypoint: ["/otel-lgtm/otelcol-contrib/otelcol-contrib"]
+    command:
+      - "--config=/etc/otelcol/config.yaml"
+      - "--feature-gates=receiver.postgresql.separateSchemaAttr"
+    environment:
+      POSTGRES_MONITOR_PASSWORD: ${POSTGRES_MONITOR_PASSWORD:-monitor1234}
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres-observability-init:
+        condition: service_completed_successfully
+      grafana-lgtm:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: unless-stopped
 
 volumes:
   postgres-data:
+  lgtm-data:

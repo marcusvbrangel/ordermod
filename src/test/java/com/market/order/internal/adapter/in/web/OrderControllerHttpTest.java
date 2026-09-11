@@ -5,6 +5,8 @@ import com.market.order.internal.application.port.in.CreateOrderResult;
 import com.market.order.internal.application.port.in.CreateOrderUseCase;
 import com.market.order.internal.application.port.in.GetOrderResult;
 import com.market.order.internal.application.port.in.GetOrderUseCase;
+import com.market.order.internal.application.port.in.CancelOrderUseCase;
+import com.market.order.internal.application.port.in.GenerateOrderReportUseCase;
 import com.market.order.internal.domain.exception.OrderDomainException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -52,7 +54,7 @@ class OrderControllerHttpTest {
         var validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
 
-        mockMvc = standaloneSetup(new OrderController(createOrderUseCase, getOrderUseCase))
+        mockMvc = standaloneSetup(controller(createOrderUseCase, getOrderUseCase))
                 .setControllerAdvice(new OrderExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -149,7 +151,7 @@ class OrderControllerHttpTest {
         };
         var validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
-        var validatingMockMvc = standaloneSetup(new OrderController(rejectingUseCase, query -> orderResult()))
+        var validatingMockMvc = standaloneSetup(controller(rejectingUseCase, query -> orderResult()))
                 .setControllerAdvice(new OrderExceptionHandler())
                 .setValidator(validator)
                 .build();
@@ -169,10 +171,26 @@ class OrderControllerHttpTest {
             throw new AssertionError("criação não deveria ser chamada");
         };
 
-        return standaloneSetup(new OrderController(unusedCreateOrderUseCase, getOrderUseCase))
+        return standaloneSetup(controller(unusedCreateOrderUseCase, getOrderUseCase))
                 .setControllerAdvice(new OrderExceptionHandler())
                 .setValidator(validator)
                 .build();
+    }
+
+    private static OrderController controller(CreateOrderUseCase createOrderUseCase,
+                                              GetOrderUseCase getOrderUseCase) {
+        CancelOrderUseCase unusedCancelOrderUseCase = command -> {
+            throw new AssertionError("cancelamento não deveria ser chamado");
+        };
+        GenerateOrderReportUseCase unusedGenerateOrderReportUseCase = query -> {
+            throw new AssertionError("relatório não deveria ser chamado");
+        };
+        return new OrderController(
+                createOrderUseCase,
+                getOrderUseCase,
+                unusedCancelOrderUseCase,
+                unusedGenerateOrderReportUseCase
+        );
     }
 
     private static GetOrderResult orderResult() {

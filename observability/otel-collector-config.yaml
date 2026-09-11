@@ -1,0 +1,104 @@
+receivers:
+  postgresql/ordermod:
+    endpoint: postgres:5432
+    transport: tcp
+    username: postgres_monitor
+    password: ${env:POSTGRES_MONITOR_PASSWORD}
+    databases:
+      - ordermod
+    collection_interval: 10s
+    initial_delay: 2s
+    tls:
+      insecure: true
+    metrics:
+      postgresql.blks_hit:
+        enabled: true
+      postgresql.blks_read:
+        enabled: true
+      postgresql.database.locks:
+        enabled: true
+      postgresql.deadlocks:
+        enabled: true
+      postgresql.query.execution.time:
+        enabled: true
+      postgresql.sequential_scans:
+        enabled: true
+      postgresql.temp.io:
+        enabled: true
+      postgresql.temp_files:
+        enabled: true
+      postgresql.tup_deleted:
+        enabled: true
+      postgresql.tup_fetched:
+        enabled: true
+      postgresql.tup_inserted:
+        enabled: true
+      postgresql.tup_returned:
+        enabled: true
+      postgresql.tup_updated:
+        enabled: true
+    events:
+      db.server.query_sample:
+        enabled: false
+      db.server.top_query:
+        enabled: true
+    top_query_collection:
+      top_n_query: 20
+      max_rows_per_query: 100
+      max_explain_each_interval: 0
+      collection_interval: 30s
+
+  docker_stats/postgres:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 10s
+    initial_delay: 2s
+    timeout: 5s
+    excluded_images:
+      - "!postgres:*"
+    container_labels_to_metric_labels:
+      com.docker.compose.project: compose.project
+      com.docker.compose.service: compose.service
+    metrics:
+      container.cpu.logical.count:
+        enabled: true
+      container.memory.percent:
+        enabled: true
+      container.pids.count:
+        enabled: true
+      container.restarts:
+        enabled: true
+      container.uptime:
+        enabled: true
+
+processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
+  resource/local:
+    attributes:
+      - key: service.name
+        value: postgresql
+        action: insert
+      - key: deployment.environment
+        value: local
+        action: upsert
+  batch:
+    timeout: 5s
+
+exporters:
+  otlp_http/lgtm:
+    endpoint: http://grafana-lgtm:4318
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [postgresql/ordermod, docker_stats/postgres]
+      processors: [memory_limiter, resource/local, batch]
+      exporters: [otlp_http/lgtm]
+    logs:
+      receivers: [postgresql/ordermod]
+      processors: [memory_limiter, resource/local, batch]
+      exporters: [otlp_http/lgtm]
