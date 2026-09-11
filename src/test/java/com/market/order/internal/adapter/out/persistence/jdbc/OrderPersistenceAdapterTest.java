@@ -88,7 +88,7 @@ class OrderPersistenceAdapterTest {
         );
 
         assertNotNull(flyway.info().current());
-        assertEquals("2", flyway.info().current().getVersion().getVersion());
+        assertEquals("3", flyway.info().current().getVersion().getVersion());
     }
 
     @Test

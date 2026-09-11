@@ -1,0 +1,156 @@
+{
+  "annotations": {"list": []},
+  "description": "PostgreSQL, pg_stat_statements, JDBC e recursos do contêiner do ordermod.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Sessões atualmente abertas no banco ordermod.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 50}, {"color": "red", "value": 80}]}, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "sum(postgresql_backends{postgresql_database_name=\"ordermod\"})", "legendFormat": "conexões", "range": true, "refId": "A"}],
+      "title": "Conexões", "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Tamanho lógico informado pelo PostgreSQL.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1073741824}, {"color": "red", "value": 5368709120}]}, "unit": "bytes"}, "overrides": []},
+      "gridPos": {"h": 5, "w": 4, "x": 4, "y": 0},
+      "id": 2,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "sum(postgresql_db_size_bytes{postgresql_database_name=\"ordermod\"})", "legendFormat": "ordermod", "range": true, "refId": "A"}],
+      "title": "Tamanho do banco", "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Percentual de leituras atendidas pelo buffer cache.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 2, "max": 100, "min": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 90}, {"color": "green", "value": 99}]}, "unit": "percent"}, "overrides": []},
+      "gridPos": {"h": 5, "w": 4, "x": 8, "y": 0},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "100 * sum(rate(postgresql_blks_hit_total{postgresql_database_name=\"ordermod\"}[$__rate_interval])) / clamp_min(sum(rate(postgresql_blks_hit_total{postgresql_database_name=\"ordermod\"}[$__rate_interval])) + sum(rate(postgresql_blks_read_total{postgresql_database_name=\"ordermod\"}[$__rate_interval])), 1)", "legendFormat": "cache hit", "range": true, "refId": "A"}],
+      "title": "Cache hit", "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Reinícios observados do contêiner PostgreSQL.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 5, "w": 4, "x": 12, "y": 0},
+      "id": 4,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "max(container_restarts_total{container_name=~\".*postgres.*\"})", "legendFormat": "reinícios", "range": true, "refId": "A"}],
+      "title": "Reinícios", "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Deadlocks acumulados no banco.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 5, "w": 4, "x": 16, "y": 0},
+      "id": 5,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "sum(postgresql_deadlocks_total{postgresql_database_name=\"ordermod\"})", "legendFormat": "deadlocks", "range": true, "refId": "A"}],
+      "title": "Deadlocks", "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Arquivos temporários criados pelo banco.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 100}]}, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 5, "w": 4, "x": 20, "y": 0},
+      "id": 6,
+      "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto", "wideLayout": true},
+      "targets": [{"editorMode": "code", "expr": "sum(postgresql_temp_files_total{postgresql_database_name=\"ordermod\"})", "legendFormat": "temporários", "range": true, "refId": "A"}],
+      "title": "Arquivos temporários", "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "transações/s", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "ops"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 5},
+      "id": 7,
+      "options": {"legend": {"calcs": ["lastNotNull", "mean"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"editorMode": "code", "expr": "sum(rate(postgresql_commits_total{postgresql_database_name=\"ordermod\"}[$__rate_interval]))", "legendFormat": "commits", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "sum(rate(postgresql_rollbacks_total{postgresql_database_name=\"ordermod\"}[$__rate_interval]))", "legendFormat": "rollbacks", "range": true, "refId": "B"}
+      ],
+      "title": "Transações", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "linhas/s", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "rows/s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 5},
+      "id": 8,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"editorMode": "code", "expr": "sum(rate(postgresql_tup_inserted_total{postgresql_database_name=\"ordermod\"}[$__rate_interval]))", "legendFormat": "inseridas", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "sum(rate(postgresql_tup_updated_total{postgresql_database_name=\"ordermod\"}[$__rate_interval]))", "legendFormat": "atualizadas", "range": true, "refId": "B"},
+        {"editorMode": "code", "expr": "sum(rate(postgresql_tup_deleted_total{postgresql_database_name=\"ordermod\"}[$__rate_interval]))", "legendFormat": "removidas", "range": true, "refId": "C"},
+        {"editorMode": "code", "expr": "sum(rate(postgresql_tup_fetched_total{postgresql_database_name=\"ordermod\"}[$__rate_interval]))", "legendFormat": "buscadas", "range": true, "refId": "D"}
+      ],
+      "title": "Atividade de tuplas", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "percentual", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "max": 100, "min": 0, "unit": "percent"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 5},
+      "id": 9,
+      "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"editorMode": "code", "expr": "100 * max(container_cpu_utilization_ratio{container_name=~\".*postgres.*\"})", "legendFormat": "CPU", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "100 * max(container_memory_percent_ratio{container_name=~\".*postgres.*\"})", "legendFormat": "memória", "range": true, "refId": "B"}
+      ],
+      "title": "CPU e memória do contêiner", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Tráfego e I/O do contêiner PostgreSQL.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "bytes/s", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "Bps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 13},
+      "id": 10,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"editorMode": "code", "expr": "sum(rate(container_network_io_usage_tx_bytes_total{container_name=~\".*postgres.*\"}[$__rate_interval]))", "legendFormat": "rede enviada", "range": true, "refId": "A"},
+        {"editorMode": "code", "expr": "sum(rate(container_network_io_usage_rx_bytes_total{container_name=~\".*postgres.*\"}[$__rate_interval]))", "legendFormat": "rede recebida", "range": true, "refId": "B"},
+        {"editorMode": "code", "expr": "sum(rate(container_blockio_io_service_bytes_recursive_total{container_name=~\".*postgres.*\"}[$__rate_interval]))", "legendFormat": "disco {{op}}", "range": true, "refId": "C"}
+      ],
+      "title": "Rede e disco do contêiner", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Latência observada pelo proxy JDBC da aplicação. A série aparece depois de tráfego SQL.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "latência", "axisPlacement": "auto", "drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "linear", "lineWidth": 2, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "none"}}, "unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 13},
+      "id": 11,
+      "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"editorMode": "code", "expr": "sum(rate(jdbc_query_milliseconds_sum{service_name=\"ordermod\",db_namespace=\"ordermod\"}[$__rate_interval])) by (db_operation_name, db_collection_name) / clamp_min(sum(rate(jdbc_query_milliseconds_count{service_name=\"ordermod\",db_namespace=\"ordermod\"}[$__rate_interval])) by (db_operation_name, db_collection_name), 1)", "legendFormat": "{{db_operation_name}} {{db_collection_name}}", "range": true, "refId": "A"}
+      ],
+      "title": "Latência JDBC", "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "description": "Eventos normalizados de pg_stat_statements; valores de parâmetros e EXPLAIN não são coletados.",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 13},
+      "id": 12,
+      "options": {"dedupStrategy": "none", "enableInfiniteScrolling": false, "enableLogDetails": true, "prettifyLogMessage": true, "showCommonLabels": false, "showLabels": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true},
+      "targets": [{"datasource": {"type": "loki", "uid": "loki"}, "editorMode": "code", "expr": "{service_name=\"postgresql\"} | json | event_name=\"db.server.top_query\"", "queryType": "range", "refId": "A"}],
+      "title": "Top queries (pg_stat_statements)", "type": "logs"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 41,
+  "tags": ["ordermod", "postgresql", "opentelemetry"],
+  "templating": {"list": []},
+  "time": {"from": "now-30m", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "PostgreSQL Overview",
+  "uid": "ordermod-postgresql",
+  "version": 1,
+  "weekStart": ""
+}

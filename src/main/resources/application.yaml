@@ -7,6 +7,9 @@ spring:
     username: myuser
     password: 1234
     driver-class-name: org.postgresql.Driver
+    hikari:
+      data-source-properties:
+        ApplicationName: ordermod
 
   flyway:
     baseline-on-migrate: true
@@ -23,8 +26,12 @@ management:
     metrics:
       export:
         url: http://localhost:4318/v1/metrics
+        step: 10s
 
   opentelemetry:
+    resource-attributes:
+      deployment.environment: local
+
     tracing:
       export:
         otlp:
@@ -38,6 +45,26 @@ management:
   tracing:
     sampling:
       probability: 1.0
+
+jdbc:
+  includes: QUERY
+  datasource-proxy:
+    enabled: true
+    include-parameter-values: false
+    query:
+      enable-logging: false
+  opentelemetry:
+    enabled: true
+    spans:
+      enabled: true
+    metrics:
+      enabled: true
+    analysis:
+      enabled: true
+      summary:
+        enabled: true
+      sanitize:
+        enabled: true
 
 
 server:

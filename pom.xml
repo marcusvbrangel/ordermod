@@ -134,6 +134,16 @@
 			<groupId>io.micrometer</groupId>
 			<artifactId>micrometer-registry-otlp</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>net.ttddyy.observation</groupId>
+			<artifactId>datasource-micrometer-spring-boot</artifactId>
+			<version>2.2.1</version>
+		</dependency>
+		<dependency>
+			<groupId>net.ttddyy.observation</groupId>
+			<artifactId>datasource-micrometer-opentelemetry</artifactId>
+			<version>2.2.1</version>
+		</dependency>
 	</dependencies>
 	<dependencyManagement>
 		<dependencies>
